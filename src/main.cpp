@@ -1,35 +1,59 @@
+#include <vulkan/vulkan.h>
+
+#include <iostream>
+#include <stdexcept>
+#include <cstdlib>
+#include <utility>
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#define GLM_FORCE_RADIANS
-#define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <glm/vec4.hpp>
-#include <glm/mat4x4.hpp>
-
-#include <iostream>
-
-int main() {
-    glfwInit();
-
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Vulkan window", nullptr, nullptr);
-
-    uint32_t extensionCount = 0;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-
-    std::cout << extensionCount << " extensions supported\n";
-
-    glm::mat4 matrix;
-    glm::vec4 vec;
-    auto test = matrix * vec;
-
-    while(!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+class Flare {
+public:
+    void Run() {
+        InitWindow();
+        InitVulkan();
+        MainLoop();
+        Cleanup();
     }
 
-    glfwDestroyWindow(window);
+private:
+    void InitWindow() {
+        glfwInit();
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        m_Window = glfwCreateWindow(m_WindowDimensions.first, m_WindowDimensions.second, "Flare", nullptr, nullptr);
 
-    glfwTerminate();
+    }
 
-    return 0;
+    void InitVulkan() {
+
+    }
+
+    void MainLoop() {
+        while (!glfwWindowShouldClose(m_Window)) {
+            glfwPollEvents();
+        }
+    }
+
+    void Cleanup() {
+        glfwDestroyWindow(m_Window);
+        glfwTerminate();
+    }
+private:
+    GLFWwindow* m_Window;
+    std::pair<uint32_t, uint32_t> m_WindowDimensions = {800, 600};
+};
+
+int main() {
+    Flare app;
+
+    try {
+        app.Run();
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
 }
