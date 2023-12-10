@@ -1,0 +1,16 @@
+cc_library(
+    name = "Solis",
+    deps = [
+        "//vendor:glfw",
+        "//vendor:spdlog",
+        "//vendor:glm",
+    ],
+)
+
+cc_binary(
+    name = "Flare",
+    srcs = ["src/main.cpp"],
+    deps = [
+        ":Solis",
+    ],
+)
