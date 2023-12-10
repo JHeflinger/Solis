@@ -1,16 +1,18 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
 cc_library(
     name = "Solis",
     deps = [
-        "//vendor:glfw",
-        "//vendor:spdlog",
-        "//vendor:glm",
-    ],
+        "//vendor/glfw",
+        "//vendor/glm",
+        "@rules_vulkan//vulkan:vulkan_cc_library"
+    ]
 )
 
 cc_binary(
     name = "Flare",
-    srcs = ["src/main.cpp"],
+    srcs = glob(["src/main.cpp"]),
     deps = [
-        ":Solis",
+        ":Solis"
     ],
 )
