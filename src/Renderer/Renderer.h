@@ -11,6 +11,7 @@ namespace Solis {
     private:
         static void CreateInstance();
         static void SetupDebugMessenger();
+        static void PickDevice();
         static bool HasValidationSupport();
         static std::vector<const char*> GetExtensions();
     };

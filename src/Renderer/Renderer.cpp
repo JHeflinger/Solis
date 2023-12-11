@@ -8,6 +8,7 @@
 namespace Solis {
 
     static VkInstance s_Instance;
+    static VkPhysicalDevice s_Device = VK_NULL_HANDLE;
     static VkDebugUtilsMessengerEXT s_DebugMessenger;
 
     static const std::vector<const char*> s_ValidationLayers = {
@@ -56,9 +57,14 @@ namespace Solis {
         createInfo.pfnUserCallback = DebugCallback;
     }
 
+    static bool SuitableDevice(VkPhysicalDevice device) {
+        return true;
+    }
+
     void Renderer::Initialize() {
         CreateInstance();
         SetupDebugMessenger();
+        PickDevice();
     }
 
     void Renderer::Cleanup() {
@@ -110,6 +116,23 @@ namespace Solis {
         PopulateDebugMessengerCreateInfo(createInfo);
         if (CreateDebugUtilsMessengerEXT(s_Instance, &createInfo, nullptr, &s_DebugMessenger) != VK_SUCCESS)
             throw std::runtime_error("Failed to set up debug messenger!");
+    }
+
+    void Renderer::PickDevice() {
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(s_Instance, &deviceCount, nullptr);
+        if (deviceCount == 0) 
+            throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(s_Instance, &deviceCount, devices.data());
+        for (const auto& device : devices) {
+            if (SuitableDevice(device)) {
+                s_Device = device;
+                break;
+            }
+        }
+        if (s_Device == VK_NULL_HANDLE)
+            throw std::runtime_error("Failed to find a suitable GPU!");
     }
 
     bool Renderer::HasValidationSupport() {
