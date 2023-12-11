@@ -1,53 +1,38 @@
-#include <vulkan/vulkan.h>
-
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
-#include <utility>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+#include "Renderer/Window.h"
+#include "Renderer/Renderer.h"
 
 class Flare {
 public:
     void Run() {
-        InitWindow();
-        InitVulkan();
-        MainLoop();
+        Init();
+        Update();
         Cleanup();
     }
 
 private:
-    void InitWindow() {
-        glfwInit();
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-        m_Window = glfwCreateWindow(m_WindowDimensions.first, m_WindowDimensions.second, "Flare", nullptr, nullptr);
-
+    void Init() {
+        m_Window.Initialize();
+        Solis::Renderer::Initialize();
     }
 
-    void InitVulkan() {
-
-    }
-
-    void MainLoop() {
-        while (!glfwWindowShouldClose(m_Window)) {
-            glfwPollEvents();
-        }
+    void Update() {
+        m_Window.Update();
     }
 
     void Cleanup() {
-        glfwDestroyWindow(m_Window);
-        glfwTerminate();
+        m_Window.Cleanup();
+        Solis::Renderer::Cleanup();
     }
 private:
-    GLFWwindow* m_Window;
-    std::pair<uint32_t, uint32_t> m_WindowDimensions = {800, 600};
+    Solis::Window m_Window;
 };
 
 int main() {
     Flare app;
-
+    
     try {
         app.Run();
     } catch (const std::exception& e) {
