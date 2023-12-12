@@ -57,10 +57,6 @@ namespace Solis {
         createInfo.pfnUserCallback = DebugCallback;
     }
 
-    static bool SuitableDevice(VkPhysicalDevice device) {
-        return true;
-    }
-
     void Renderer::Initialize() {
         CreateInstance();
         SetupDebugMessenger();
@@ -152,6 +148,28 @@ namespace Solis {
             if (!layerFound) return false;
         }
         return true;
+    }
+
+    QueueFamily Renderer::FindQueueFamilies(VkPhysicalDevice device) {
+        QueueFamily indices;
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                indices.GraphicsFamily = i;
+            }
+            i++;
+        }
+        return indices;
+    }
+
+    bool Renderer::SuitableDevice(VkPhysicalDevice device) {
+        //NOTE: modify as needed for certain GPU features
+        QueueFamily indices = Renderer::FindQueueFamilies(device);
+        return indices.IsComplete();
     }
 
     std::vector<const char*> Renderer::GetExtensions() {
