@@ -1,6 +1,8 @@
 #include "Renderer.h"
+#include "Window.h"
 #include <iostream>
 #include <cstring>
+#include <set>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -8,8 +10,14 @@
 namespace Solis {
 
     static VkInstance s_Instance;
-    static VkPhysicalDevice s_Device = VK_NULL_HANDLE;
+    static VkPhysicalDevice s_PhysicalDevice = VK_NULL_HANDLE;
     static VkDebugUtilsMessengerEXT s_DebugMessenger;
+    static VkDevice s_Device;
+    static VkQueue s_GraphicsQueue;
+    static VkSurfaceKHR s_Surface;
+    static VkQueue s_PresentQueue;
+
+    static Window s_Window;
 
     static const std::vector<const char*> s_ValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -58,15 +66,30 @@ namespace Solis {
     }
 
     void Renderer::Initialize() {
+        s_Window.Initialize();
         CreateInstance();
         SetupDebugMessenger();
+        CreateSurface();
         PickDevice();
+        CreateLogicalDevice();
+    }
+
+    void Renderer::Update() {
+        s_Window.Update();
     }
 
     void Renderer::Cleanup() {
+        s_Window.Cleanup();
+        vkDestroyDevice(s_Device, nullptr);
         if (s_EnableValidationLayers)
             DestroyDebugUtilsMessengerEXT(s_Instance, s_DebugMessenger, nullptr);
+        vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
+    }
+
+    void Renderer::CreateSurface() {
+        if (glfwCreateWindowSurface(s_Instance, s_Window.RawWindow(), nullptr, &s_Surface) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create window surface!");
     }
 
     void Renderer::CreateInstance() {
@@ -123,12 +146,45 @@ namespace Solis {
         vkEnumeratePhysicalDevices(s_Instance, &deviceCount, devices.data());
         for (const auto& device : devices) {
             if (SuitableDevice(device)) {
-                s_Device = device;
+                s_PhysicalDevice = device;
                 break;
             }
         }
-        if (s_Device == VK_NULL_HANDLE)
+        if (s_PhysicalDevice == VK_NULL_HANDLE)
             throw std::runtime_error("Failed to find a suitable GPU!");
+    }
+
+    void Renderer::CreateLogicalDevice() {
+        QueueFamily indices = FindQueueFamilies(s_PhysicalDevice);
+
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        std::set<uint32_t> uniqueQueueFamilies = { indices.GraphicsFamily.value(), indices.PresentFamily.value() };
+        
+        float queuePriority = 1.0f;
+        for (uint32_t queueFamily : uniqueQueueFamilies) {
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = queueFamily;
+            queueCreateInfo.queueCount = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
+
+        VkPhysicalDeviceFeatures deviceFeatures{};
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+        createInfo.pQueueCreateInfos = queueCreateInfos.data();
+        createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.enabledExtensionCount = 0;
+        if (s_EnableValidationLayers) {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(s_ValidationLayers.size());
+            createInfo.ppEnabledLayerNames = s_ValidationLayers.data();
+        } else createInfo.enabledLayerCount = 0;
+        if (vkCreateDevice(s_PhysicalDevice, &createInfo, nullptr, &s_Device) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create logical device!");
+        vkGetDeviceQueue(s_Device, indices.PresentFamily.value(), 0, &s_PresentQueue);
+        vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
     }
 
     bool Renderer::HasValidationSupport() {
@@ -160,6 +216,10 @@ namespace Solis {
         for (const auto& queueFamily : queueFamilies) {
             if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                 indices.GraphicsFamily = i;
+                VkBool32 presentSupport = false;
+                vkGetPhysicalDeviceSurfaceSupportKHR(device, i, s_Surface, &presentSupport);
+                if (presentSupport)
+                    indices.PresentFamily = i;
             }
             i++;
         }

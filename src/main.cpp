@@ -1,7 +1,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
-#include "Renderer/Window.h"
 #include "Renderer/Renderer.h"
 
 class Flare {
@@ -14,20 +13,16 @@ public:
 
 private:
     void Init() {
-        m_Window.Initialize();
         Solis::Renderer::Initialize();
     }
 
     void Update() {
-        m_Window.Update();
+        Solis::Renderer::Update();
     }
 
     void Cleanup() {
-        m_Window.Cleanup();
         Solis::Renderer::Cleanup();
     }
-private:
-    Solis::Window m_Window;
 };
 
 int main() {

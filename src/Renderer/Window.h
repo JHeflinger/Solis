@@ -15,6 +15,7 @@ namespace Solis {
         void Cleanup();
         void SetName(std::string name) { m_Name = name; }
         void SetDimensions(WindowSize dimensions) { m_Dimensions = dimensions; }
+        GLFWwindow* RawWindow() { return m_Window; }
     private:
         std::string m_Name = "Flare";
         GLFWwindow* m_Window;
