@@ -3,6 +3,9 @@
 #include <iostream>
 #include <cstring>
 #include <set>
+#include <cstdint>
+#include <limits>
+#include <algorithm>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -16,11 +19,19 @@ namespace Solis {
     static VkQueue s_GraphicsQueue;
     static VkSurfaceKHR s_Surface;
     static VkQueue s_PresentQueue;
+    static VkSwapchainKHR s_SwapChain;
+    static std::vector<VkImage> s_SwapChainImages;
+    static VkFormat s_SwapChainImageFormat;
+    static VkExtent2D s_SwapChainExtent;
 
     static Window s_Window;
 
     static const std::vector<const char*> s_ValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
+    };
+
+    static std::vector<const char*> s_DeviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
 
     #ifdef NDEBUG
@@ -72,6 +83,7 @@ namespace Solis {
         CreateSurface();
         PickDevice();
         CreateLogicalDevice();
+        CreateSwapChain();
     }
 
     void Renderer::Update() {
@@ -80,11 +92,54 @@ namespace Solis {
 
     void Renderer::Cleanup() {
         s_Window.Cleanup();
+        vkDestroySwapchainKHR(s_Device, s_SwapChain, nullptr);
         vkDestroyDevice(s_Device, nullptr);
         if (s_EnableValidationLayers)
             DestroyDebugUtilsMessengerEXT(s_Instance, s_DebugMessenger, nullptr);
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
+    }
+
+    void Renderer::CreateSwapChain() {
+        SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(s_PhysicalDevice);
+        VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
+        VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.PresentModes);
+        VkExtent2D extent = ChooseSwapExtent(swapChainSupport.Capabilities);
+        uint32_t imageCount = swapChainSupport.Capabilities.minImageCount + 1;
+        if (swapChainSupport.Capabilities.maxImageCount > 0 && imageCount > swapChainSupport.Capabilities.maxImageCount)
+            imageCount = swapChainSupport.Capabilities.maxImageCount;
+        VkSwapchainCreateInfoKHR createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+        createInfo.surface = s_Surface;
+        createInfo.minImageCount = imageCount;
+        createInfo.imageFormat = surfaceFormat.format;
+        createInfo.imageColorSpace = surfaceFormat.colorSpace;
+        createInfo.imageExtent = extent;
+        createInfo.imageArrayLayers = 1;
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        QueueFamily indices = FindQueueFamilies(s_PhysicalDevice);
+        uint32_t queueFamilyIndices[] = { indices.GraphicsFamily.value(), indices.PresentFamily.value() };
+        if (indices.GraphicsFamily != indices.PresentFamily) {
+            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = queueFamilyIndices;
+        } else {
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;
+            createInfo.pQueueFamilyIndices = nullptr;
+        }
+        createInfo.preTransform = swapChainSupport.Capabilities.currentTransform;
+        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        createInfo.presentMode = presentMode;
+        createInfo.clipped = VK_TRUE;
+        createInfo.oldSwapchain = VK_NULL_HANDLE;
+        if (vkCreateSwapchainKHR(s_Device, &createInfo, nullptr, &s_SwapChain) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create swap chain!");
+        vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, nullptr);
+        s_SwapChainImages.resize(imageCount);
+        vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, s_SwapChainImages.data());
+        s_SwapChainImageFormat = surfaceFormat.format;
+        s_SwapChainExtent = extent;
     }
 
     void Renderer::CreateSurface() {
@@ -176,7 +231,8 @@ namespace Solis {
         createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
         createInfo.pEnabledFeatures = &deviceFeatures;
-        createInfo.enabledExtensionCount = 0;
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size());
+        createInfo.ppEnabledExtensionNames = s_DeviceExtensions.data();
         if (s_EnableValidationLayers) {
             createInfo.enabledLayerCount = static_cast<uint32_t>(s_ValidationLayers.size());
             createInfo.ppEnabledLayerNames = s_ValidationLayers.data();
@@ -229,7 +285,24 @@ namespace Solis {
     bool Renderer::SuitableDevice(VkPhysicalDevice device) {
         //NOTE: modify as needed for certain GPU features
         QueueFamily indices = Renderer::FindQueueFamilies(device);
-        return indices.IsComplete();
+        bool extensionsSupported = CheckDeviceExtensionSupport(device);
+        bool swapChainAdequate = false;
+        if (extensionsSupported) {
+            SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport(device);
+            swapChainAdequate = !swapChainSupport.Formats.empty() && !swapChainSupport.PresentModes.empty();
+        }
+        return indices.IsComplete() && extensionsSupported && swapChainAdequate;
+    }
+    
+    bool Renderer::CheckDeviceExtensionSupport(VkPhysicalDevice device) {
+        uint32_t extensionCount;
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+        std::set<std::string> requiredExtensions(s_DeviceExtensions.begin(), s_DeviceExtensions.end());
+        for (const auto& extension : availableExtensions)
+            requiredExtensions.erase(extension.extensionName);
+        return requiredExtensions.empty();
     }
 
     std::vector<const char*> Renderer::GetExtensions() {
@@ -240,6 +313,58 @@ namespace Solis {
         if (s_EnableValidationLayers) 
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         return extensions;
+    }
+
+    SwapChainSupportDetails Renderer::QuerySwapChainSupport(VkPhysicalDevice device) {
+        SwapChainSupportDetails details;
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, s_Surface, &details.Capabilities);
+        uint32_t formatCount;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, s_Surface, &formatCount, nullptr);
+        if (formatCount != 0) {
+            details.Formats.resize(formatCount);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, s_Surface, &formatCount, details.Formats.data());
+        }
+        uint32_t presentModeCount;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, s_Surface, &presentModeCount, nullptr);
+        if (presentModeCount != 0) {
+            details.PresentModes.resize(presentModeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, s_Surface, &presentModeCount, details.PresentModes.data());
+        }
+        return details;
+    }
+
+    VkSurfaceFormatKHR Renderer::ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+        for (const auto& availableFormat : availableFormats) {
+            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                return availableFormat;
+            }
+        }
+        return availableFormats[0];
+    }
+    
+    VkPresentModeKHR Renderer::ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes) {
+        for (const auto& availablePresentMode : availablePresentModes) {
+            if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+                return availablePresentMode;
+            }
+        }
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    VkExtent2D Renderer::ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
+        if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+            return capabilities.currentExtent;
+        } else {
+            int width, height;
+            glfwGetFramebufferSize(s_Window.RawWindow(), &width, &height);
+            VkExtent2D actualExtent = {
+                static_cast<uint32_t>(width),
+                static_cast<uint32_t>(height)
+            };
+            actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+            actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+            return actualExtent;
+        }
     }
 
 }

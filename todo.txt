@@ -1,3 +1,2 @@
 following vulkan tut:
-https://vulkan-tutorial.com/en/Drawing_a_triangle/Setup/Physical_devices_and_queue_families
-at "Base device suitability checks"
+https://vulkan-tutorial.com/en/Drawing_a_triangle/Presentation/Image_views
