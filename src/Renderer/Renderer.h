@@ -21,8 +21,12 @@ namespace Solis {
     public:
         static void Initialize();
         static void Update();
+        static void DrawFrame();
         static void Cleanup();
     private:
+        static void CreateCommandBuffer();
+        static void CreateCommandPool();
+        static void CreateFrameBuffers();
         static void CreateRenderPass();
         static void CreateGraphicsPipeline();
         static void CreateImageViews();
@@ -42,5 +46,6 @@ namespace Solis {
         static VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
         static VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
         static VkShaderModule CreateShaderModule(const std::vector<char>& code);
+        static void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     };
 }

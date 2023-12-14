@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "Renderer.h"
 
 namespace Solis {
 
@@ -12,6 +13,7 @@ namespace Solis {
     void Window::Update() {
         while (!glfwWindowShouldClose(m_Window)) {
             glfwPollEvents();
+            Renderer::DrawFrame();
         }
     }
 

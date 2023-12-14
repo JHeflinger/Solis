@@ -28,6 +28,9 @@ namespace Solis {
     static VkRenderPass s_RenderPass;
     static VkPipelineLayout s_PipelineLayout;
     static VkPipeline s_GraphicsPipeline;
+    static std::vector<VkFramebuffer> s_SwapChainFramebuffers;
+    static VkCommandPool s_CommandPool;
+    static VkCommandBuffer s_CommandBuffer;
 
     static Window s_Window;
 
@@ -92,14 +95,24 @@ namespace Solis {
         CreateImageViews();
         CreateRenderPass();
         CreateGraphicsPipeline();
+        CreateFrameBuffers();
+        CreateCommandPool();
+        CreateCommandBuffer();
     }
 
     void Renderer::Update() {
         s_Window.Update();
     }
 
+    void Renderer::DrawFrame() {
+        
+    }
+
     void Renderer::Cleanup() {
         s_Window.Cleanup();
+        vkDestroyCommandPool(s_Device, s_CommandPool, nullptr);
+        for (auto framebuffer : s_SwapChainFramebuffers)
+            vkDestroyFramebuffer(s_Device, framebuffer, nullptr);
         vkDestroyPipeline(s_Device, s_GraphicsPipeline, nullptr);
         vkDestroyPipelineLayout(s_Device, s_PipelineLayout, nullptr);
         vkDestroyRenderPass(s_Device, s_RenderPass, nullptr);
@@ -111,6 +124,48 @@ namespace Solis {
             DestroyDebugUtilsMessengerEXT(s_Instance, s_DebugMessenger, nullptr);
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
+    }
+
+    void Renderer::CreateCommandBuffer() {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = s_CommandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        if (vkAllocateCommandBuffers(s_Device, &allocInfo, &s_CommandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("failed to allocate command buffers!");
+    }
+
+    void Renderer::CreateCommandPool() {
+        QueueFamily queueFamilyIndices = FindQueueFamilies(s_PhysicalDevice);
+        VkCommandPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = queueFamilyIndices.GraphicsFamily.value();
+        if (vkCreateCommandPool(s_Device, &poolInfo, nullptr, &s_CommandPool) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create command pool!");
+    }
+
+    void Renderer::CreateFrameBuffers() {
+        s_SwapChainFramebuffers.resize(s_SwapChainImageViews.size());
+        for (size_t i = 0; i < s_SwapChainImageViews.size(); i++) {
+            VkImageView attachments[] = {
+                s_SwapChainImageViews[i]
+            };
+
+            VkFramebufferCreateInfo framebufferInfo{};
+            framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            framebufferInfo.renderPass = s_RenderPass;
+            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.width = s_SwapChainExtent.width;
+            framebufferInfo.height = s_SwapChainExtent.height;
+            framebufferInfo.layers = 1;
+
+            if (vkCreateFramebuffer(s_Device, &framebufferInfo, nullptr, &s_SwapChainFramebuffers[i]) != VK_SUCCESS)
+                throw std::runtime_error("Failed to create framebuffer!");
+        }
     }
 
     void Renderer::CreateRenderPass() {
@@ -582,6 +637,47 @@ namespace Solis {
         if (vkCreateShaderModule(s_Device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
             throw std::runtime_error("Failed to create shader module!");
         return shaderModule;
+    }
+    
+    void Renderer::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = 0;
+        beginInfo.pInheritanceInfo = nullptr;
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
+            throw std::runtime_error("Failed to begin recording command buffer!");
+        VkRenderPassBeginInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        renderPassInfo.renderPass = s_RenderPass;
+        renderPassInfo.framebuffer = s_SwapChainFramebuffers[imageIndex];
+        renderPassInfo.renderArea.offset = {0, 0};
+        renderPassInfo.renderArea.extent = s_SwapChainExtent;
+        VkClearValue clearColor = {{{0.1f, 0.1f, 0.1f, 1.0f}}};
+        renderPassInfo.clearValueCount = 1;
+        renderPassInfo.pClearValues = &clearColor;
+        vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_GraphicsPipeline);
+
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(s_SwapChainExtent.width);
+        viewport.height = static_cast<float>(s_SwapChainExtent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = s_SwapChainExtent;
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(commandBuffer);
+
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
+            throw std::runtime_error("Failed to record command buffer!");
     }
 
 }
