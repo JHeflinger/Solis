@@ -22,8 +22,10 @@ namespace Solis {
         static void Initialize();
         static void Update();
         static void DrawFrame();
+        static void Wait();
         static void Cleanup();
     private:
+        static void CreateSyncObjects();
         static void CreateCommandBuffer();
         static void CreateCommandPool();
         static void CreateFrameBuffers();

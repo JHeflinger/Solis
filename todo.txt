@@ -1,2 +1,2 @@
 following vulkan tut:
-https://vulkan-tutorial.com/en/Drawing_a_triangle/Presentation/Image_views
+https://vulkan-tutorial.com/en/Drawing_a_triangle/Drawing/Frames_in_flight

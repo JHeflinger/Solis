@@ -15,6 +15,7 @@ namespace Solis {
             glfwPollEvents();
             Renderer::DrawFrame();
         }
+        Renderer::Wait();
     }
 
     void Window::Cleanup() {

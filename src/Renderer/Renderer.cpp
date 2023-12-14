@@ -31,6 +31,9 @@ namespace Solis {
     static std::vector<VkFramebuffer> s_SwapChainFramebuffers;
     static VkCommandPool s_CommandPool;
     static VkCommandBuffer s_CommandBuffer;
+    static VkSemaphore s_ImageAvailableSemaphore;
+    static VkSemaphore s_RenderFinishedSemaphore;
+    static VkFence s_InFlightFence;
 
     static Window s_Window;
 
@@ -98,6 +101,7 @@ namespace Solis {
         CreateFrameBuffers();
         CreateCommandPool();
         CreateCommandBuffer();
+        CreateSyncObjects();
     }
 
     void Renderer::Update() {
@@ -105,11 +109,54 @@ namespace Solis {
     }
 
     void Renderer::DrawFrame() {
+        vkWaitForFences(s_Device, 1, &s_InFlightFence, VK_TRUE, UINT64_MAX);
+        vkResetFences(s_Device, 1, &s_InFlightFence);
+
+        uint32_t imageIndex;
+        vkAcquireNextImageKHR(s_Device, s_SwapChain, UINT64_MAX, s_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
         
+        vkResetCommandBuffer(s_CommandBuffer, 0);
+        RecordCommandBuffer(s_CommandBuffer, imageIndex);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        VkSemaphore waitSemaphores[] = {s_ImageAvailableSemaphore};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores;
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &s_CommandBuffer;
+        VkSemaphore signalSemaphores[] = {s_RenderFinishedSemaphore};
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores;
+
+        if (vkQueueSubmit(s_GraphicsQueue, 1, &submitInfo, s_InFlightFence) != VK_SUCCESS)
+            throw std::runtime_error("Failed to submit draw command buffer!");
+
+        VkPresentInfoKHR presentInfo{};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+        VkSwapchainKHR swapChains[] = {s_SwapChain};
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapChains;
+        presentInfo.pImageIndices = &imageIndex;
+        presentInfo.pResults = nullptr;
+        
+        vkQueuePresentKHR(s_PresentQueue, &presentInfo);
+    }
+
+    void Renderer::Wait() {
+        vkDeviceWaitIdle(s_Device);
     }
 
     void Renderer::Cleanup() {
         s_Window.Cleanup();
+        vkDestroySemaphore(s_Device, s_ImageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(s_Device, s_RenderFinishedSemaphore, nullptr);
+        vkDestroyFence(s_Device, s_InFlightFence, nullptr);
         vkDestroyCommandPool(s_Device, s_CommandPool, nullptr);
         for (auto framebuffer : s_SwapChainFramebuffers)
             vkDestroyFramebuffer(s_Device, framebuffer, nullptr);
@@ -124,6 +171,18 @@ namespace Solis {
             DestroyDebugUtilsMessengerEXT(s_Instance, s_DebugMessenger, nullptr);
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
+    }
+
+    void Renderer::CreateSyncObjects() {
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        if (vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_ImageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_RenderFinishedSemaphore) != VK_SUCCESS ||
+            vkCreateFence(s_Device, &fenceInfo, nullptr, &s_InFlightFence) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create semaphores!");
     }
 
     void Renderer::CreateCommandBuffer() {
@@ -194,6 +253,16 @@ namespace Solis {
         renderPassInfo.pAttachments = &colorAttachment;
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
+
+        VkSubpassDependency dependency{};
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = 0;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
 
         if (vkCreateRenderPass(s_Device, &renderPassInfo, nullptr, &s_RenderPass) != VK_SUCCESS)
             throw std::runtime_error("Failed to create render pass!");
