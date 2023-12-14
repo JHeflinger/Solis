@@ -23,6 +23,7 @@ namespace Solis {
         static void Update();
         static void Cleanup();
     private:
+        static void CreateRenderPass();
         static void CreateGraphicsPipeline();
         static void CreateImageViews();
         static void CreateSwapChain();

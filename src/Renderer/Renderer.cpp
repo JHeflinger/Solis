@@ -25,7 +25,9 @@ namespace Solis {
     static VkFormat s_SwapChainImageFormat;
     static VkExtent2D s_SwapChainExtent;
     static std::vector<VkImageView> s_SwapChainImageViews;
+    static VkRenderPass s_RenderPass;
     static VkPipelineLayout s_PipelineLayout;
+    static VkPipeline s_GraphicsPipeline;
 
     static Window s_Window;
 
@@ -88,6 +90,7 @@ namespace Solis {
         CreateLogicalDevice();
         CreateSwapChain();
         CreateImageViews();
+        CreateRenderPass();
         CreateGraphicsPipeline();
     }
 
@@ -97,7 +100,9 @@ namespace Solis {
 
     void Renderer::Cleanup() {
         s_Window.Cleanup();
+        vkDestroyPipeline(s_Device, s_GraphicsPipeline, nullptr);
         vkDestroyPipelineLayout(s_Device, s_PipelineLayout, nullptr);
+        vkDestroyRenderPass(s_Device, s_RenderPass, nullptr);
         for (auto imageView : s_SwapChainImageViews)
             vkDestroyImageView(s_Device, imageView, nullptr);
         vkDestroySwapchainKHR(s_Device, s_SwapChain, nullptr);
@@ -107,6 +112,38 @@ namespace Solis {
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
     }
+
+    void Renderer::CreateRenderPass() {
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = s_SwapChainImageFormat;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+        if (vkCreateRenderPass(s_Device, &renderPassInfo, nullptr, &s_RenderPass) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create render pass!");
+    }
+
 
     void Renderer::CreateGraphicsPipeline() {
         auto vertShaderCode = FileUtils::Read("shaders/compiled/vert.spv");
@@ -221,6 +258,27 @@ namespace Solis {
 
         if (vkCreatePipelineLayout(s_Device, &pipelineLayoutInfo, nullptr, &s_PipelineLayout) != VK_SUCCESS)
             throw std::runtime_error("Failed to create pipeline layout!");
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr;
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = s_PipelineLayout;
+        pipelineInfo.renderPass = s_RenderPass;
+        pipelineInfo.subpass = 0;
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+        pipelineInfo.basePipelineIndex = -1;
+
+        if (vkCreateGraphicsPipelines(s_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &s_GraphicsPipeline) != VK_SUCCESS)
+            throw std::runtime_error("Failed to create graphics pipeline!");
 
         vkDestroyShaderModule(s_Device, vertShaderModule, nullptr);
         vkDestroyShaderModule(s_Device, fragShaderModule, nullptr);
