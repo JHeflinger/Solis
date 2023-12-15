@@ -7,6 +7,12 @@
 #include <array>
 
 namespace Solis {
+    struct UniformBufferObject {
+        glm::mat4 Model;
+        glm::mat4 View;
+        glm::mat4 Projection;
+    };
+
     struct Vertex {
         glm::vec2 Position;
         glm::vec3 Color;
