@@ -1,7 +1,7 @@
 #include "Renderer.h"
 #include "Window.h"
 #include "../Utils/FileUtils.h"
-#include <iostream>
+#include "../Core/Base.h"
 #include <cstring>
 #include <set>
 #include <cstdint>
@@ -11,31 +11,35 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#define MAX_FRAMES_IN_FLIGHT 2
+
 namespace Solis {
 
-    static VkInstance s_Instance;
-    static VkPhysicalDevice s_PhysicalDevice = VK_NULL_HANDLE;
-    static VkDebugUtilsMessengerEXT s_DebugMessenger;
-    static VkDevice s_Device;
-    static VkQueue s_GraphicsQueue;
-    static VkSurfaceKHR s_Surface;
-    static VkQueue s_PresentQueue;
-    static VkSwapchainKHR s_SwapChain;
-    static std::vector<VkImage> s_SwapChainImages;
-    static VkFormat s_SwapChainImageFormat;
-    static VkExtent2D s_SwapChainExtent;
-    static std::vector<VkImageView> s_SwapChainImageViews;
-    static VkRenderPass s_RenderPass;
-    static VkPipelineLayout s_PipelineLayout;
-    static VkPipeline s_GraphicsPipeline;
-    static std::vector<VkFramebuffer> s_SwapChainFramebuffers;
-    static VkCommandPool s_CommandPool;
-    static VkCommandBuffer s_CommandBuffer;
-    static VkSemaphore s_ImageAvailableSemaphore;
-    static VkSemaphore s_RenderFinishedSemaphore;
-    static VkFence s_InFlightFence;
+    static VkInstance                     s_Instance;
+    static VkPhysicalDevice               s_PhysicalDevice = VK_NULL_HANDLE;
+    static VkDebugUtilsMessengerEXT       s_DebugMessenger;
+    static VkDevice                       s_Device;
+    static VkQueue                        s_GraphicsQueue;
+    static VkSurfaceKHR                   s_Surface;
+    static VkQueue                        s_PresentQueue;
+    static VkSwapchainKHR                 s_SwapChain;
+    static std::vector<VkImage>           s_SwapChainImages;
+    static VkFormat                       s_SwapChainImageFormat;
+    static VkExtent2D                     s_SwapChainExtent;
+    static std::vector<VkImageView>       s_SwapChainImageViews;
+    static VkRenderPass                   s_RenderPass;
+    static VkPipelineLayout               s_PipelineLayout;
+    static VkPipeline                     s_GraphicsPipeline;
+    static std::vector<VkFramebuffer>     s_SwapChainFramebuffers;
+    static VkCommandPool                  s_CommandPool;
+    static std::vector<VkCommandBuffer>   s_CommandBuffers;
+    static std::vector<VkSemaphore>       s_ImageAvailableSemaphores;
+    static std::vector<VkSemaphore>       s_RenderFinishedSemaphores;
+    static std::vector<VkFence>           s_InFlightFences;
 
-    static Window s_Window;
+    static Window                         s_Window;
+    static uint32_t                       s_CurrentFrame = 0;
+    static bool                           s_FramebufferResized = false;
 
     static const std::vector<const char*> s_ValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -65,18 +69,15 @@ namespace Solis {
         const VkAllocationCallbacks* pAllocator, 
         VkDebugUtilsMessengerEXT* pDebugMessenger) {
         auto func = (PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
-        if (func != nullptr)
-            return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
-        else
-            return VK_ERROR_EXTENSION_NOT_PRESENT;
+        if (func != nullptr) return func(instance, pCreateInfo, pAllocator, pDebugMessenger);
+        else return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
     static void DestroyDebugUtilsMessengerEXT(VkInstance instance, 
         VkDebugUtilsMessengerEXT debugMessenger, 
         const VkAllocationCallbacks* pAllocator) {
         auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (func != nullptr)
-            func(instance, debugMessenger, pAllocator);
+        if (func != nullptr) func(instance, debugMessenger, pAllocator);
     }
 
     static void PopulateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
@@ -87,8 +88,13 @@ namespace Solis {
         createInfo.pfnUserCallback = DebugCallback;
     }
 
+    static void FramebufferResizeCallback(GLFWwindow* window, int width, int height) {
+        s_FramebufferResized = true;
+    }
+
     void Renderer::Initialize() {
         s_Window.Initialize();
+        SetResizeCallback();
         CreateInstance();
         SetupDebugMessenger();
         CreateSurface();
@@ -109,31 +115,38 @@ namespace Solis {
     }
 
     void Renderer::DrawFrame() {
-        vkWaitForFences(s_Device, 1, &s_InFlightFence, VK_TRUE, UINT64_MAX);
-        vkResetFences(s_Device, 1, &s_InFlightFence);
+        vkWaitForFences(s_Device, 1, &s_InFlightFences[s_CurrentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(s_Device, s_SwapChain, UINT64_MAX, s_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-        
-        vkResetCommandBuffer(s_CommandBuffer, 0);
-        RecordCommandBuffer(s_CommandBuffer, imageIndex);
+        VkResult result = vkAcquireNextImageKHR(s_Device, s_SwapChain, UINT64_MAX, s_ImageAvailableSemaphores[s_CurrentFrame], VK_NULL_HANDLE, &imageIndex);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            RecreateSwapChain();
+            return;
+        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            ERROR("Failed to acquire swap chain image!");
+        }
+
+        vkResetFences(s_Device, 1, &s_InFlightFences[s_CurrentFrame]);
+
+        vkResetCommandBuffer(s_CommandBuffers[s_CurrentFrame], 0);
+        RecordCommandBuffer(s_CommandBuffers[s_CurrentFrame], imageIndex);
 
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-        VkSemaphore waitSemaphores[] = {s_ImageAvailableSemaphore};
+        VkSemaphore waitSemaphores[] = {s_ImageAvailableSemaphores[s_CurrentFrame]};
         VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &s_CommandBuffer;
-        VkSemaphore signalSemaphores[] = {s_RenderFinishedSemaphore};
+        submitInfo.pCommandBuffers = &s_CommandBuffers[s_CurrentFrame];
+        VkSemaphore signalSemaphores[] = {s_RenderFinishedSemaphores[s_CurrentFrame]};
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        if (vkQueueSubmit(s_GraphicsQueue, 1, &submitInfo, s_InFlightFence) != VK_SUCCESS)
-            throw std::runtime_error("Failed to submit draw command buffer!");
+        if (vkQueueSubmit(s_GraphicsQueue, 1, &submitInfo, s_InFlightFences[s_CurrentFrame]) != VK_SUCCESS)
+            ERROR("Failed to submit draw command buffer!");
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -145,7 +158,15 @@ namespace Solis {
         presentInfo.pImageIndices = &imageIndex;
         presentInfo.pResults = nullptr;
         
-        vkQueuePresentKHR(s_PresentQueue, &presentInfo);
+        result = vkQueuePresentKHR(s_PresentQueue, &presentInfo);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || s_FramebufferResized) {
+            s_FramebufferResized = false;
+            RecreateSwapChain();
+        } else if (result != VK_SUCCESS) {
+            ERROR("Failed to present swap chain image!");
+        }
+
+        s_CurrentFrame = (s_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     void Renderer::Wait() {
@@ -153,47 +174,82 @@ namespace Solis {
     }
 
     void Renderer::Cleanup() {
-        s_Window.Cleanup();
-        vkDestroySemaphore(s_Device, s_ImageAvailableSemaphore, nullptr);
-        vkDestroySemaphore(s_Device, s_RenderFinishedSemaphore, nullptr);
-        vkDestroyFence(s_Device, s_InFlightFence, nullptr);
+        CleanSwapChain();
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroySemaphore(s_Device, s_ImageAvailableSemaphores[i], nullptr);
+            vkDestroySemaphore(s_Device, s_RenderFinishedSemaphores[i], nullptr);
+            vkDestroyFence(s_Device, s_InFlightFences[i], nullptr);
+        }
         vkDestroyCommandPool(s_Device, s_CommandPool, nullptr);
-        for (auto framebuffer : s_SwapChainFramebuffers)
-            vkDestroyFramebuffer(s_Device, framebuffer, nullptr);
         vkDestroyPipeline(s_Device, s_GraphicsPipeline, nullptr);
         vkDestroyPipelineLayout(s_Device, s_PipelineLayout, nullptr);
         vkDestroyRenderPass(s_Device, s_RenderPass, nullptr);
-        for (auto imageView : s_SwapChainImageViews)
-            vkDestroyImageView(s_Device, imageView, nullptr);
-        vkDestroySwapchainKHR(s_Device, s_SwapChain, nullptr);
         vkDestroyDevice(s_Device, nullptr);
         if (s_EnableValidationLayers)
             DestroyDebugUtilsMessengerEXT(s_Instance, s_DebugMessenger, nullptr);
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
+        s_Window.Cleanup();
+    }
+
+    void Renderer::SetResizeCallback() {
+        glfwSetFramebufferSizeCallback(s_Window.RawWindow(), FramebufferResizeCallback);
+    }
+
+    void Renderer::CleanSwapChain() {
+        for (auto framebuffer : s_SwapChainFramebuffers)
+            vkDestroyFramebuffer(s_Device, framebuffer, nullptr);
+        for (auto imageView : s_SwapChainImageViews)
+            vkDestroyImageView(s_Device, imageView, nullptr);
+        vkDestroySwapchainKHR(s_Device, s_SwapChain, nullptr);
+    }
+
+    void Renderer::RecreateSwapChain() {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(s_Window.RawWindow(), &width, &height);
+        while (width == 0 || height == 0) {
+            glfwGetFramebufferSize(s_Window.RawWindow(), &width, &height);
+            glfwWaitEvents();
+        }
+
+        vkDeviceWaitIdle(s_Device);
+
+        CleanSwapChain();
+
+        CreateSwapChain();
+        CreateImageViews();
+        CreateFrameBuffers();
     }
 
     void Renderer::CreateSyncObjects() {
+        s_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        s_RenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        s_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
         VkSemaphoreCreateInfo semaphoreInfo{};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         VkFenceCreateInfo fenceInfo{};
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        if (vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_ImageAvailableSemaphore) != VK_SUCCESS ||
-            vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_RenderFinishedSemaphore) != VK_SUCCESS ||
-            vkCreateFence(s_Device, &fenceInfo, nullptr, &s_InFlightFence) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create semaphores!");
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(s_Device, &fenceInfo, nullptr, &s_InFlightFences[i]) != VK_SUCCESS)
+                ERROR("Failed to create sync objects for a frame!");
+        }
     }
 
     void Renderer::CreateCommandBuffer() {
+        s_CommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.commandPool = s_CommandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        allocInfo.commandBufferCount = 1;
+        allocInfo.commandBufferCount = (uint32_t)s_CommandBuffers.size();
 
-        if (vkAllocateCommandBuffers(s_Device, &allocInfo, &s_CommandBuffer) != VK_SUCCESS)
-            throw std::runtime_error("failed to allocate command buffers!");
+        if (vkAllocateCommandBuffers(s_Device, &allocInfo, s_CommandBuffers.data()) != VK_SUCCESS)
+            ERROR("failed to allocate command buffers!");
     }
 
     void Renderer::CreateCommandPool() {
@@ -203,7 +259,7 @@ namespace Solis {
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.GraphicsFamily.value();
         if (vkCreateCommandPool(s_Device, &poolInfo, nullptr, &s_CommandPool) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create command pool!");
+            ERROR("Failed to create command pool!");
     }
 
     void Renderer::CreateFrameBuffers() {
@@ -223,7 +279,7 @@ namespace Solis {
             framebufferInfo.layers = 1;
 
             if (vkCreateFramebuffer(s_Device, &framebufferInfo, nullptr, &s_SwapChainFramebuffers[i]) != VK_SUCCESS)
-                throw std::runtime_error("Failed to create framebuffer!");
+                ERROR("Failed to create framebuffer!");
         }
     }
 
@@ -265,7 +321,7 @@ namespace Solis {
         renderPassInfo.pDependencies = &dependency;
 
         if (vkCreateRenderPass(s_Device, &renderPassInfo, nullptr, &s_RenderPass) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create render pass!");
+            ERROR("Failed to create render pass!");
     }
 
 
@@ -381,7 +437,7 @@ namespace Solis {
         pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
         if (vkCreatePipelineLayout(s_Device, &pipelineLayoutInfo, nullptr, &s_PipelineLayout) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create pipeline layout!");
+            ERROR("Failed to create pipeline layout!");
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -402,7 +458,7 @@ namespace Solis {
         pipelineInfo.basePipelineIndex = -1;
 
         if (vkCreateGraphicsPipelines(s_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &s_GraphicsPipeline) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create graphics pipeline!");
+            ERROR("Failed to create graphics pipeline!");
 
         vkDestroyShaderModule(s_Device, vertShaderModule, nullptr);
         vkDestroyShaderModule(s_Device, fragShaderModule, nullptr);
@@ -426,7 +482,7 @@ namespace Solis {
             createInfo.subresourceRange.baseArrayLayer = 0;
             createInfo.subresourceRange.layerCount = 1;
             if (vkCreateImageView(s_Device, &createInfo, nullptr, &s_SwapChainImageViews[i]) != VK_SUCCESS)
-                throw std::runtime_error("Failed to create image views!");
+                ERROR("Failed to create image views!");
         }
     }
 
@@ -464,7 +520,7 @@ namespace Solis {
         createInfo.clipped = VK_TRUE;
         createInfo.oldSwapchain = VK_NULL_HANDLE;
         if (vkCreateSwapchainKHR(s_Device, &createInfo, nullptr, &s_SwapChain) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create swap chain!");
+            ERROR("Failed to create swap chain!");
         vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, nullptr);
         s_SwapChainImages.resize(imageCount);
         vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, s_SwapChainImages.data());
@@ -474,13 +530,13 @@ namespace Solis {
 
     void Renderer::CreateSurface() {
         if (glfwCreateWindowSurface(s_Instance, s_Window.RawWindow(), nullptr, &s_Surface) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create window surface!");
+            ERROR("Failed to create window surface!");
     }
 
     void Renderer::CreateInstance() {
         // Check for validation layers
         if (s_EnableValidationLayers && !HasValidationSupport())
-            throw std::runtime_error("Validation layers requested, but not available!");
+            ERROR("Validation layers requested, but not available!");
 
         // Creating application info
         VkApplicationInfo appInfo{};
@@ -511,7 +567,7 @@ namespace Solis {
         }
 
         if (vkCreateInstance(&createInfo, nullptr, &s_Instance) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create Vulkan Instance!");
+            ERROR("Failed to create Vulkan Instance!");
     }
 
     void Renderer::SetupDebugMessenger() {
@@ -519,14 +575,14 @@ namespace Solis {
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         PopulateDebugMessengerCreateInfo(createInfo);
         if (CreateDebugUtilsMessengerEXT(s_Instance, &createInfo, nullptr, &s_DebugMessenger) != VK_SUCCESS)
-            throw std::runtime_error("Failed to set up debug messenger!");
+            ERROR("Failed to set up debug messenger!");
     }
 
     void Renderer::PickDevice() {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(s_Instance, &deviceCount, nullptr);
         if (deviceCount == 0) 
-            throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+            ERROR("Failed to find GPUs with Vulkan support!");
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(s_Instance, &deviceCount, devices.data());
         for (const auto& device : devices) {
@@ -536,7 +592,7 @@ namespace Solis {
             }
         }
         if (s_PhysicalDevice == VK_NULL_HANDLE)
-            throw std::runtime_error("Failed to find a suitable GPU!");
+            ERROR("Failed to find a suitable GPU!");
     }
 
     void Renderer::CreateLogicalDevice() {
@@ -568,7 +624,7 @@ namespace Solis {
             createInfo.ppEnabledLayerNames = s_ValidationLayers.data();
         } else createInfo.enabledLayerCount = 0;
         if (vkCreateDevice(s_PhysicalDevice, &createInfo, nullptr, &s_Device) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create logical device!");
+            ERROR("Failed to create logical device!");
         vkGetDeviceQueue(s_Device, indices.PresentFamily.value(), 0, &s_PresentQueue);
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
     }
@@ -704,7 +760,7 @@ namespace Solis {
         createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(s_Device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
-            throw std::runtime_error("Failed to create shader module!");
+            ERROR("Failed to create shader module!");
         return shaderModule;
     }
     
@@ -714,14 +770,14 @@ namespace Solis {
         beginInfo.flags = 0;
         beginInfo.pInheritanceInfo = nullptr;
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
-            throw std::runtime_error("Failed to begin recording command buffer!");
+            ERROR("Failed to begin recording command buffer!");
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = s_RenderPass;
         renderPassInfo.framebuffer = s_SwapChainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = s_SwapChainExtent;
-        VkClearValue clearColor = {{{0.1f, 0.1f, 0.1f, 1.0f}}};
+        VkClearValue clearColor = {{{0.01f, 0.01f, 0.01f, 1.0f}}};
         renderPassInfo.clearValueCount = 1;
         renderPassInfo.pClearValues = &clearColor;
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
@@ -746,7 +802,7 @@ namespace Solis {
         vkCmdEndRenderPass(commandBuffer);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
-            throw std::runtime_error("Failed to record command buffer!");
+            ERROR("Failed to record command buffer!");
     }
 
 }

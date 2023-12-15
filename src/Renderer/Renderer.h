@@ -25,6 +25,9 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void SetResizeCallback();
+        static void CleanSwapChain();
+        static void RecreateSwapChain();
         static void CreateSyncObjects();
         static void CreateCommandBuffer();
         static void CreateCommandPool();

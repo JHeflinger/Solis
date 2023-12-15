@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <cstdlib>
 #include "Renderer/Renderer.h"
+#include "Core/Base.h"
 
 class Flare {
 public:

@@ -1,4 +1,5 @@
 #include "FileUtils.h"
+#include "../Core/Base.h"
 #include <fstream>
 #include <filesystem>
 
@@ -13,7 +14,7 @@ namespace Solis {
     std::vector<char> FileUtils::Read(const std::string& filename) {
         std::ifstream file(SANDBOX + filename, std::ios::ate | std::ios::binary);
         if (!file.is_open())
-            throw std::runtime_error("Failed to open file \"" + filename + "\"");
+            ERROR("Failed to open file \"" + filename + "\"");
         size_t fileSize = (size_t) file.tellg();
         std::vector<char> buffer(fileSize);
         file.seekg(0);
@@ -28,7 +29,7 @@ namespace Solis {
             for (const auto& entry : std::filesystem::directory_iterator((SANDBOX + dirname).c_str()))
                 contents.push_back(entry.path().filename());
         } catch (const std::filesystem::filesystem_error& ex) {
-            throw std::runtime_error("Failed to open directory \"" + dirname + "\"");
+            ERROR("Failed to open directory \"" + dirname + "\"");
         }
         return contents;
     }
