@@ -38,6 +38,8 @@ namespace Solis {
     static std::vector<VkFence>           s_InFlightFences;
     static VkBuffer                       s_VertexBuffer;
     static VkDeviceMemory                 s_VertexBufferMemory;
+    static VkBuffer                       s_IndexBuffer;
+    static VkDeviceMemory                 s_IndexBufferMemory;
 
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
@@ -52,9 +54,14 @@ namespace Solis {
     };
 
     static const std::vector<Vertex> s_Vertices = {
-        {{0.0f, -0.5f}, {0.9f, 0.3f, 0.2f}},
-        {{0.5f, 0.5f}, {0.3f, 0.9f, 0.2f}},
-        {{-0.5f, 0.5f}, {0.3f, 0.2f, 0.9f}}
+        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+    };
+
+    static const std::vector<uint16_t> s_Indices = {
+        0, 1, 2, 2, 3, 0
     };
 
     #ifdef NDEBUG
@@ -115,6 +122,7 @@ namespace Solis {
         CreateFrameBuffers();
         CreateCommandPool();
         CreateVertexBuffer();
+        CreateIndexBuffer();
         CreateCommandBuffer();
         CreateSyncObjects();
     }
@@ -186,6 +194,8 @@ namespace Solis {
         CleanSwapChain();
         vkFreeMemory(s_Device, s_VertexBufferMemory, nullptr);
         vkDestroyBuffer(s_Device, s_VertexBuffer, nullptr);
+        vkFreeMemory(s_Device, s_IndexBufferMemory, nullptr);
+        vkDestroyBuffer(s_Device, s_IndexBuffer, nullptr);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(s_Device, s_ImageAvailableSemaphores[i], nullptr);
             vkDestroySemaphore(s_Device, s_RenderFinishedSemaphores[i], nullptr);
@@ -203,33 +213,65 @@ namespace Solis {
         s_Window.Cleanup();
     }
 
-    void Renderer::CreateVertexBuffer() {
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = sizeof(s_Vertices[0]) * s_Vertices.size();
-        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    void Renderer::CreateIndexBuffer() {
+        VkDeviceSize bufferSize = sizeof(s_Indices[0]) * s_Indices.size();
 
-        if (vkCreateBuffer(s_Device, &bufferInfo, nullptr, &s_VertexBuffer) != VK_SUCCESS)
-            ERROR("Failed to create vertex buffer");
-
-        VkMemoryRequirements memRequirements;
-        vkGetBufferMemoryRequirements(s_Device, s_VertexBuffer, &memRequirements);
-
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
-        allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        if (vkAllocateMemory(s_Device, &allocInfo, nullptr, &s_VertexBufferMemory) != VK_SUCCESS)
-            ERROR("Failed to allocate vertex buffer memory!");
-
-        vkBindBufferMemory(s_Device, s_VertexBuffer, s_VertexBufferMemory, 0);
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        CreateBuffer(bufferSize, 
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | 
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+                     stagingBuffer, 
+                     stagingBufferMemory);
 
         void* data;
-        vkMapMemory(s_Device, s_VertexBufferMemory, 0, bufferInfo.size, 0, &data);
-        memcpy(data, s_Vertices.data(), (size_t)bufferInfo.size);
-        vkUnmapMemory(s_Device, s_VertexBufferMemory);
+        vkMapMemory(s_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, s_Indices.data(), (size_t) bufferSize);
+        vkUnmapMemory(s_Device, stagingBufferMemory);
+
+        CreateBuffer(bufferSize, 
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT | 
+                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+                     s_IndexBuffer, 
+                     s_IndexBufferMemory);
+
+        CopyBuffer(stagingBuffer, s_IndexBuffer, bufferSize);
+
+        vkDestroyBuffer(s_Device, stagingBuffer, nullptr);
+        vkFreeMemory(s_Device, stagingBufferMemory, nullptr);
+    }
+
+    void Renderer::CreateVertexBuffer() {
+        VkDeviceSize bufferSize = sizeof(s_Vertices[0]) * s_Vertices.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+
+        CreateBuffer(bufferSize, 
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | 
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+                     stagingBuffer, 
+                     stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(s_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, s_Vertices.data(), (size_t)bufferSize);
+        vkUnmapMemory(s_Device, stagingBufferMemory);
+
+        CreateBuffer(bufferSize, 
+                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+                     s_VertexBuffer, 
+                     s_VertexBufferMemory);
+        
+        CopyBuffer(stagingBuffer, s_VertexBuffer, bufferSize);
+
+        vkDestroyBuffer(s_Device, stagingBuffer, nullptr);
+        vkFreeMemory(s_Device, stagingBufferMemory, nullptr);
     }
 
     void Renderer::SetResizeCallback() {
@@ -672,6 +714,65 @@ namespace Solis {
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
     }
 
+    void Renderer::CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandPool = s_CommandPool;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(s_Device, &allocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0; // Optional
+        copyRegion.dstOffset = 0; // Optional
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(s_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(s_GraphicsQueue);
+
+        vkFreeCommandBuffers(s_Device, s_CommandPool, 1, &commandBuffer);
+    }
+
+    void Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = size;
+        bufferInfo.usage = usage;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(s_Device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) 
+            ERROR("Failed to create buffer!");
+
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(s_Device, buffer, &memRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+
+        if (vkAllocateMemory(s_Device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) 
+            ERROR("Failed to allocate buffer memory!");
+
+        vkBindBufferMemory(s_Device, buffer, bufferMemory, 0);
+    }
+
     uint32_t Renderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
         VkPhysicalDeviceMemoryProperties memProperties;
         vkGetPhysicalDeviceMemoryProperties(s_PhysicalDevice, &memProperties);
@@ -838,6 +939,7 @@ namespace Solis {
         VkBuffer vertexBuffers[] = {s_VertexBuffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, s_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -853,7 +955,7 @@ namespace Solis {
         scissor.extent = s_SwapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(commandBuffer, static_cast<uint32_t>(s_Vertices.size()), 1, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(s_Indices.size()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 

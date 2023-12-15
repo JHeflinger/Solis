@@ -27,6 +27,7 @@ private:
 };
 
 int main() {
+    INFO("Starting Flare...");
     Flare app;
     
     try {

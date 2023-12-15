@@ -53,6 +53,7 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void CreateIndexBuffer();
         static void CreateVertexBuffer();
         static void SetResizeCallback();
         static void CleanSwapChain();
@@ -70,6 +71,8 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static void CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
+        static void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
         static uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
         static bool HasValidationSupport();
         static bool SuitableDevice(VkPhysicalDevice device);
