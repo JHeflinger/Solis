@@ -36,6 +36,8 @@ namespace Solis {
     static std::vector<VkSemaphore>       s_ImageAvailableSemaphores;
     static std::vector<VkSemaphore>       s_RenderFinishedSemaphores;
     static std::vector<VkFence>           s_InFlightFences;
+    static VkBuffer                       s_VertexBuffer;
+    static VkDeviceMemory                 s_VertexBufferMemory;
 
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
@@ -47,6 +49,12 @@ namespace Solis {
 
     static std::vector<const char*> s_DeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    };
+
+    static const std::vector<Vertex> s_Vertices = {
+        {{0.0f, -0.5f}, {0.9f, 0.3f, 0.2f}},
+        {{0.5f, 0.5f}, {0.3f, 0.9f, 0.2f}},
+        {{-0.5f, 0.5f}, {0.3f, 0.2f, 0.9f}}
     };
 
     #ifdef NDEBUG
@@ -106,6 +114,7 @@ namespace Solis {
         CreateGraphicsPipeline();
         CreateFrameBuffers();
         CreateCommandPool();
+        CreateVertexBuffer();
         CreateCommandBuffer();
         CreateSyncObjects();
     }
@@ -175,6 +184,8 @@ namespace Solis {
 
     void Renderer::Cleanup() {
         CleanSwapChain();
+        vkFreeMemory(s_Device, s_VertexBufferMemory, nullptr);
+        vkDestroyBuffer(s_Device, s_VertexBuffer, nullptr);
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(s_Device, s_ImageAvailableSemaphores[i], nullptr);
             vkDestroySemaphore(s_Device, s_RenderFinishedSemaphores[i], nullptr);
@@ -190,6 +201,35 @@ namespace Solis {
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
         s_Window.Cleanup();
+    }
+
+    void Renderer::CreateVertexBuffer() {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.size = sizeof(s_Vertices[0]) * s_Vertices.size();
+        bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(s_Device, &bufferInfo, nullptr, &s_VertexBuffer) != VK_SUCCESS)
+            ERROR("Failed to create vertex buffer");
+
+        VkMemoryRequirements memRequirements;
+        vkGetBufferMemoryRequirements(s_Device, s_VertexBuffer, &memRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memRequirements.size;
+        allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(s_Device, &allocInfo, nullptr, &s_VertexBufferMemory) != VK_SUCCESS)
+            ERROR("Failed to allocate vertex buffer memory!");
+
+        vkBindBufferMemory(s_Device, s_VertexBuffer, s_VertexBufferMemory, 0);
+
+        void* data;
+        vkMapMemory(s_Device, s_VertexBufferMemory, 0, bufferInfo.size, 0, &data);
+        memcpy(data, s_Vertices.data(), (size_t)bufferInfo.size);
+        vkUnmapMemory(s_Device, s_VertexBufferMemory);
     }
 
     void Renderer::SetResizeCallback() {
@@ -355,12 +395,15 @@ namespace Solis {
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        auto bindingDescription = Vertex::GetBindingDescription();
+        auto attributeDescriptions = Vertex::GetAttributeDescriptions();
+
         VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputInfo.vertexBindingDescriptionCount = 0;
-        vertexInputInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
-        vertexInputInfo.pVertexBindingDescriptions = nullptr; // Optional
+        vertexInputInfo.vertexBindingDescriptionCount = 1;
+        vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputInfo.pVertexBindingDescriptions = &bindingDescription; // Optional
+        vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // Optional
 
         VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
         inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -629,6 +672,15 @@ namespace Solis {
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
     }
 
+    uint32_t Renderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memProperties;
+        vkGetPhysicalDeviceMemoryProperties(s_PhysicalDevice, &memProperties);
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
+            if (typeFilter & (1 << i) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
+                return i;
+        ERROR("Failed to find a suitable memory type!");
+    }
+
     bool Renderer::HasValidationSupport() {
         uint32_t layerCount;
         vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -783,6 +835,10 @@ namespace Solis {
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_GraphicsPipeline);
 
+        VkBuffer vertexBuffers[] = {s_VertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
@@ -797,7 +853,7 @@ namespace Solis {
         scissor.extent = s_SwapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        vkCmdDraw(commandBuffer, static_cast<uint32_t>(s_Vertices.size()), 1, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);
 
