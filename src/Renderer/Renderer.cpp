@@ -7,9 +7,15 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+#include <chrono>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
@@ -40,6 +46,12 @@ namespace Solis {
     static VkDeviceMemory                 s_VertexBufferMemory;
     static VkBuffer                       s_IndexBuffer;
     static VkDeviceMemory                 s_IndexBufferMemory;
+    static VkDescriptorSetLayout          s_DescriptorSetLayout;
+    static std::vector<VkBuffer>          s_UniformBuffers;
+    static std::vector<VkDeviceMemory>    s_UniformBuffersMemory;
+    static std::vector<void*>             s_MappedUniformBuffers;
+    static VkDescriptorPool               s_DescriptorPool;
+    static std::vector<VkDescriptorSet>   s_DescriptorSets;
 
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
@@ -118,11 +130,15 @@ namespace Solis {
         CreateSwapChain();
         CreateImageViews();
         CreateRenderPass();
+        CreateDescriptorSetLayout();
         CreateGraphicsPipeline();
         CreateFrameBuffers();
         CreateCommandPool();
         CreateVertexBuffer();
         CreateIndexBuffer();
+        CreateUniformBuffers();
+        CreateDescriptorPool();
+        CreateDescriptorSets();
         CreateCommandBuffer();
         CreateSyncObjects();
     }
@@ -144,6 +160,8 @@ namespace Solis {
         }
 
         vkResetFences(s_Device, 1, &s_InFlightFences[s_CurrentFrame]);
+
+        UpdateUniformBuffer(s_CurrentFrame);
 
         vkResetCommandBuffer(s_CommandBuffers[s_CurrentFrame], 0);
         RecordCommandBuffer(s_CommandBuffers[s_CurrentFrame], imageIndex);
@@ -192,6 +210,12 @@ namespace Solis {
 
     void Renderer::Cleanup() {
         CleanSwapChain();
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyBuffer(s_Device, s_UniformBuffers[i], nullptr);
+            vkFreeMemory(s_Device, s_UniformBuffersMemory[i], nullptr);
+        }
+        vkDestroyDescriptorPool(s_Device, s_DescriptorPool, nullptr);
+        vkDestroyDescriptorSetLayout(s_Device, s_DescriptorSetLayout, nullptr);
         vkFreeMemory(s_Device, s_VertexBufferMemory, nullptr);
         vkDestroyBuffer(s_Device, s_VertexBuffer, nullptr);
         vkFreeMemory(s_Device, s_IndexBufferMemory, nullptr);
@@ -211,6 +235,85 @@ namespace Solis {
         vkDestroySurfaceKHR(s_Instance, s_Surface, nullptr);
         vkDestroyInstance(s_Instance, nullptr);
         s_Window.Cleanup();
+    }
+
+    void Renderer::CreateDescriptorSets() {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, s_DescriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = s_DescriptorPool;
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.pSetLayouts = layouts.data();
+        s_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        if (vkAllocateDescriptorSets(s_Device, &allocInfo, s_DescriptorSets.data()) != VK_SUCCESS)
+            ERROR("Failed to allocate descriptor sets!");
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorBufferInfo bufferInfo{};
+            bufferInfo.buffer = s_UniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet descriptorWrite{};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = s_DescriptorSets[i];
+            descriptorWrite.dstBinding = 0;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo = &bufferInfo;
+            descriptorWrite.pImageInfo = nullptr; // Optional
+            descriptorWrite.pTexelBufferView = nullptr; // Optional
+            vkUpdateDescriptorSets(s_Device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
+    void Renderer::CreateDescriptorPool() {
+        VkDescriptorPoolSize poolSize{};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkDescriptorPoolCreateInfo poolInfo{};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        if (vkCreateDescriptorPool(s_Device, &poolInfo, nullptr, &s_DescriptorPool) != VK_SUCCESS)
+            ERROR("Failed to create descriptor pool!");
+    }
+
+    void Renderer::CreateUniformBuffers() {
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        s_UniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        s_UniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        s_MappedUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            CreateBuffer(bufferSize, 
+                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | 
+                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         s_UniformBuffers[i],
+                         s_UniformBuffersMemory[i]);
+            vkMapMemory(s_Device, s_UniformBuffersMemory[i], 0, bufferSize, 0, &s_MappedUniformBuffers[i]);
+        }
+    }
+
+    void Renderer::CreateDescriptorSetLayout() {
+        VkDescriptorSetLayoutBinding uboLayoutBinding{};
+        uboLayoutBinding.binding = 0;
+        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.descriptorCount = 1;
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        uboLayoutBinding.pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboLayoutBinding;
+
+        if (vkCreateDescriptorSetLayout(s_Device, &layoutInfo, nullptr, &s_DescriptorSetLayout) != VK_SUCCESS)
+            ERROR("Failed to create descriptor set layout!");
     }
 
     void Renderer::CreateIndexBuffer() {
@@ -478,7 +581,7 @@ namespace Solis {
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rasterizer.depthBiasEnable = VK_FALSE;
         rasterizer.depthBiasConstantFactor = 0.0f; // Optional
         rasterizer.depthBiasClamp = 0.0f; // Optional
@@ -516,8 +619,8 @@ namespace Solis {
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0; // Optional
-        pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+        pipelineLayoutInfo.setLayoutCount = 1; // Optional
+        pipelineLayoutInfo.pSetLayouts = &s_DescriptorSetLayout; // Optional
         pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
         pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
@@ -712,6 +815,18 @@ namespace Solis {
             ERROR("Failed to create logical device!");
         vkGetDeviceQueue(s_Device, indices.PresentFamily.value(), 0, &s_PresentQueue);
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
+    }
+
+    void Renderer::UpdateUniformBuffer(uint32_t currentImage) {
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        UniformBufferObject ubo{};
+        ubo.Model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.View = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.Projection = glm::perspective(glm::radians(45.0f), s_SwapChainExtent.width / (float) s_SwapChainExtent.height, 0.1f, 10.0f);
+        ubo.Projection[1][1] *= -1;
+        memcpy(s_MappedUniformBuffers[currentImage], &ubo, sizeof(ubo));
     }
 
     void Renderer::CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size) {
@@ -955,6 +1070,7 @@ namespace Solis {
         scissor.extent = s_SwapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_PipelineLayout, 0, 1, &s_DescriptorSets[s_CurrentFrame], 0, nullptr);
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(s_Indices.size()), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(commandBuffer);

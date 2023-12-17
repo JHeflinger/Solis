@@ -59,6 +59,10 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void CreateDescriptorSets();
+        static void CreateDescriptorPool();
+        static void CreateUniformBuffers();
+        static void CreateDescriptorSetLayout();
         static void CreateIndexBuffer();
         static void CreateVertexBuffer();
         static void SetResizeCallback();
@@ -77,6 +81,7 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static void UpdateUniformBuffer(uint32_t currentImage);
         static void CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
         static void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
         static uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
