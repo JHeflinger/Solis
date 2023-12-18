@@ -8,6 +8,9 @@ cc_library(
         "src/*.h",
         "src/**/*.h"
     ]),
+    deps = [
+        "//vendor:stb_image"
+    ]
 )
 
 cc_binary(

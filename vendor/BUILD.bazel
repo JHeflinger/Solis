@@ -1,0 +1,6 @@
+cc_library(
+    name = "stb_image",
+    hdrs = ["stbimage/stb_image.h"],
+    includes = ["stbimage"],
+    visibility = ["//visibility:public"]
+)
