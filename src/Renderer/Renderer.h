@@ -59,6 +59,7 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void CreateTextureImage();
         static void CreateDescriptorSets();
         static void CreateDescriptorPool();
         static void CreateUniformBuffers();
@@ -81,6 +82,11 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+        static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+        static VkCommandBuffer BeginSingleTimeCommands();
+        static void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
+        static void CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
         static void UpdateUniformBuffer(uint32_t currentImage);
         static void CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
         static void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
