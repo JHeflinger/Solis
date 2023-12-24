@@ -59,6 +59,8 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void CreateTextureSampler();
+        static void CreateTextureImageView();
         static void CreateTextureImage();
         static void CreateDescriptorSets();
         static void CreateDescriptorPool();
@@ -82,6 +84,7 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static VkImageView CreateImageView(VkImage image, VkFormat format);
         static void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
         static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
         static VkCommandBuffer BeginSingleTimeCommands();
