@@ -4,3 +4,10 @@ cc_library(
     includes = ["stbimage"],
     visibility = ["//visibility:public"]
 )
+
+cc_library(
+    name = "tiny_obj_loader",
+    hdrs = ["tinyobj/tiny_obj_loader.h"],
+    includes = ["tinyobj"],
+    visibility = ["//visibility:public"]
+)

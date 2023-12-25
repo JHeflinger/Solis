@@ -9,7 +9,8 @@ cc_library(
         "src/**/*.h"
     ]),
     deps = [
-        "//vendor:stb_image"
+        "//vendor:stb_image",
+        "//vendor:tiny_obj_loader"
     ]
 )
 

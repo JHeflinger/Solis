@@ -17,6 +17,7 @@ namespace Solis {
     void Console::Update() {
         while (s_Listen) {
             //FLUSH();
+            break;
             std::string input = Input();
             switch (GetCommand(input)) {
                 case Command::INVALID:
@@ -31,7 +32,6 @@ namespace Solis {
                 default:
                     FATAL("Error duing command fetch");
             }
-            break; // temp, delete later so we continue
         }
     }
 
