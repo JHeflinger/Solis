@@ -18,7 +18,7 @@ namespace Solis {
     std::vector<char> FileUtils::Read(const std::string& filename) {
         std::ifstream file(Path(filename), std::ios::ate | std::ios::binary);
         if (!file.is_open())
-            ERROR("Failed to open file \"" + filename + "\"");
+            FATAL("Failed to open file \"" + filename + "\"");
         size_t fileSize = (size_t) file.tellg();
         std::vector<char> buffer(fileSize);
         file.seekg(0);
@@ -33,7 +33,7 @@ namespace Solis {
             for (const auto& entry : std::filesystem::directory_iterator((Path(dirname)).c_str()))
                 contents.push_back(entry.path().filename());
         } catch (const std::filesystem::filesystem_error& ex) {
-            ERROR("Failed to open directory \"" + dirname + "\"");
+            FATAL("Failed to open directory \"" + dirname + "\"");
         }
         return contents;
     }

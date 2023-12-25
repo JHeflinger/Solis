@@ -14,8 +14,9 @@ namespace Solis {
     };
 
     struct Vertex {
-        glm::vec2 Position;
+        glm::vec3 Position;
         glm::vec3 Color;
+        glm::vec2 TextureCoord;
 
         static VkVertexInputBindingDescription GetBindingDescription() {
             VkVertexInputBindingDescription bindingDescription{};
@@ -25,16 +26,23 @@ namespace Solis {
             return bindingDescription;
         }
 
-        static std::array<VkVertexInputAttributeDescription, 2> GetAttributeDescriptions() {
-            std::array<VkVertexInputAttributeDescription, 2> attributeDescription{};
+        static std::array<VkVertexInputAttributeDescription, 3> GetAttributeDescriptions() {
+            std::array<VkVertexInputAttributeDescription, 3> attributeDescription{};
             attributeDescription[0].binding = 0;
             attributeDescription[0].location = 0;
-            attributeDescription[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescription[0].format = VK_FORMAT_R32G32B32_SFLOAT;
             attributeDescription[0].offset = offsetof(Vertex, Position);
+
             attributeDescription[1].binding = 0;
             attributeDescription[1].location = 1;
             attributeDescription[1].format = VK_FORMAT_R32G32B32_SFLOAT;
             attributeDescription[1].offset = offsetof(Vertex, Color);
+
+            attributeDescription[2].binding = 0;
+            attributeDescription[2].location = 2;
+            attributeDescription[2].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescription[2].offset = offsetof(Vertex, TextureCoord);
+
             return attributeDescription;
         }
     };
@@ -59,6 +67,7 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void CreateDepthResources();
         static void CreateTextureSampler();
         static void CreateTextureImageView();
         static void CreateTextureImage();
@@ -84,7 +93,10 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
-        static VkImageView CreateImageView(VkImage image, VkFormat format);
+        static bool HasStencilComponent(VkFormat format);
+        static VkFormat FindDepthFormat();
+        static VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+        static VkImageView CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
         static void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
         static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
         static VkCommandBuffer BeginSingleTimeCommands();

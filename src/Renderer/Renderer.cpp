@@ -14,6 +14,7 @@
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -59,6 +60,9 @@ namespace Solis {
     static VkDeviceMemory                 s_TextureImageMemory;
     static VkImageView                    s_TextureImageView;
     static VkSampler                      s_TextureSampler;
+    static VkImage                        s_DepthImage;
+    static VkDeviceMemory                 s_DepthImageMemory;
+    static VkImageView                    s_DepthImageView;
 
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
@@ -73,14 +77,20 @@ namespace Solis {
     };
 
     static const std::vector<Vertex> s_Vertices = {
-        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+        {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+        {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+        {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+
+        {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+        {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+        {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
     };
 
     static const std::vector<uint16_t> s_Indices = {
-        0, 1, 2, 2, 3, 0
+        0, 1, 2, 2, 3, 0,
+        4, 5, 6, 6, 7, 4
     };
 
     #ifdef NDEBUG
@@ -94,7 +104,7 @@ namespace Solis {
         VkDebugUtilsMessageTypeFlagsEXT messageType,
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void* pUserData) {
-        std::cerr << ABNORMAL("[VALIDATION] ") << pCallbackData->pMessage << std::endl;
+        DEBUG(pCallbackData->pMessage);
         return VK_FALSE;
     }
 
@@ -139,8 +149,9 @@ namespace Solis {
         CreateRenderPass();
         CreateDescriptorSetLayout();
         CreateGraphicsPipeline();
-        CreateFrameBuffers();
         CreateCommandPool();
+        CreateDepthResources();
+        CreateFrameBuffers();
         CreateTextureImage();
         CreateTextureImageView();
         CreateTextureSampler();
@@ -166,7 +177,7 @@ namespace Solis {
             RecreateSwapChain();
             return;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            ERROR("Failed to acquire swap chain image!");
+            FATAL("Failed to acquire swap chain image!");
         }
 
         vkResetFences(s_Device, 1, &s_InFlightFences[s_CurrentFrame]);
@@ -191,7 +202,7 @@ namespace Solis {
         submitInfo.pSignalSemaphores = signalSemaphores;
 
         if (vkQueueSubmit(s_GraphicsQueue, 1, &submitInfo, s_InFlightFences[s_CurrentFrame]) != VK_SUCCESS)
-            ERROR("Failed to submit draw command buffer!");
+            FATAL("Failed to submit draw command buffer!");
 
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -208,7 +219,7 @@ namespace Solis {
             s_FramebufferResized = false;
             RecreateSwapChain();
         } else if (result != VK_SUCCESS) {
-            ERROR("Failed to present swap chain image!");
+            FATAL("Failed to present swap chain image!");
         }
 
         s_CurrentFrame = (s_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
@@ -251,6 +262,19 @@ namespace Solis {
         s_Window.Cleanup();
     }
 
+    void Renderer::CreateDepthResources() {
+        VkFormat depthFormat = FindDepthFormat();
+        CreateImage(s_SwapChainExtent.width, 
+                    s_SwapChainExtent.height,
+                    depthFormat,
+                    VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                    s_DepthImage,
+                    s_DepthImageMemory);
+        s_DepthImageView = CreateImageView(s_DepthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+
     void Renderer::CreateTextureSampler() {
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -272,11 +296,11 @@ namespace Solis {
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = 0.0f;
         if (vkCreateSampler(s_Device, &samplerInfo, nullptr, &s_TextureSampler) != VK_SUCCESS)
-            ERROR("Failed to create texture sampler!");
+            FATAL("Failed to create texture sampler!");
     }
 
     void Renderer::CreateTextureImageView() {
-        s_TextureImageView = CreateImageView(s_TextureImage, VK_FORMAT_R8G8B8A8_SRGB);
+        s_TextureImageView = CreateImageView(s_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     void Renderer::CreateTextureImage() {
@@ -285,7 +309,7 @@ namespace Solis {
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels)
-            ERROR("Failed to load texture image!");
+            FATAL("Failed to load texture image!");
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -317,39 +341,52 @@ namespace Solis {
         allocInfo.pSetLayouts = layouts.data();
         s_DescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
         if (vkAllocateDescriptorSets(s_Device, &allocInfo, s_DescriptorSets.data()) != VK_SUCCESS)
-            ERROR("Failed to allocate descriptor sets!");
+            FATAL("Failed to allocate descriptor sets!");
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = s_UniformBuffers[i];
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
-            VkWriteDescriptorSet descriptorWrite{};
-            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite.dstSet = s_DescriptorSets[i];
-            descriptorWrite.dstBinding = 0;
-            descriptorWrite.dstArrayElement = 0;
-            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrite.descriptorCount = 1;
-            descriptorWrite.pBufferInfo = &bufferInfo;
-            descriptorWrite.pImageInfo = nullptr; // Optional
-            descriptorWrite.pTexelBufferView = nullptr; // Optional
-            vkUpdateDescriptorSets(s_Device, 1, &descriptorWrite, 0, nullptr);
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = s_TextureImageView;
+            imageInfo.sampler = s_TextureSampler;
+
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = s_DescriptorSets[i];
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = s_DescriptorSets[i];
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &imageInfo;
+            vkUpdateDescriptorSets(s_Device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
         }
     }
 
     void Renderer::CreateDescriptorPool() {
-        VkDescriptorPoolSize poolSize{};
-        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        std::array<VkDescriptorPoolSize, 2> poolSizes{};
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.poolSizeCount = 1;
-        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         if (vkCreateDescriptorPool(s_Device, &poolInfo, nullptr, &s_DescriptorPool) != VK_SUCCESS)
-            ERROR("Failed to create descriptor pool!");
+            FATAL("Failed to create descriptor pool!");
     }
 
     void Renderer::CreateUniformBuffers() {
@@ -378,13 +415,21 @@ namespace Solis {
         uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         uboLayoutBinding.pImmutableSamplers = nullptr;
 
+        VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+        samplerLayoutBinding.binding = 1;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 1;
-        layoutInfo.pBindings = &uboLayoutBinding;
+        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
+        layoutInfo.pBindings = bindings.data();
 
         if (vkCreateDescriptorSetLayout(s_Device, &layoutInfo, nullptr, &s_DescriptorSetLayout) != VK_SUCCESS)
-            ERROR("Failed to create descriptor set layout!");
+            FATAL("Failed to create descriptor set layout!");
     }
 
     void Renderer::CreateIndexBuffer() {
@@ -453,6 +498,9 @@ namespace Solis {
     }
 
     void Renderer::CleanSwapChain() {
+        vkDestroyImageView(s_Device, s_DepthImageView, nullptr);
+        vkDestroyImage(s_Device, s_DepthImage, nullptr);
+        vkFreeMemory(s_Device, s_DepthImageMemory, nullptr);
         for (auto framebuffer : s_SwapChainFramebuffers)
             vkDestroyFramebuffer(s_Device, framebuffer, nullptr);
         for (auto imageView : s_SwapChainImageViews)
@@ -474,6 +522,7 @@ namespace Solis {
 
         CreateSwapChain();
         CreateImageViews();
+        CreateDepthResources();
         CreateFrameBuffers();
     }
 
@@ -492,7 +541,7 @@ namespace Solis {
             if (vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
                 vkCreateSemaphore(s_Device, &semaphoreInfo, nullptr, &s_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(s_Device, &fenceInfo, nullptr, &s_InFlightFences[i]) != VK_SUCCESS)
-                ERROR("Failed to create sync objects for a frame!");
+                FATAL("Failed to create sync objects for a frame!");
         }
     }
 
@@ -505,7 +554,7 @@ namespace Solis {
         allocInfo.commandBufferCount = (uint32_t)s_CommandBuffers.size();
 
         if (vkAllocateCommandBuffers(s_Device, &allocInfo, s_CommandBuffers.data()) != VK_SUCCESS)
-            ERROR("failed to allocate command buffers!");
+            FATAL("failed to allocate command buffers!");
     }
 
     void Renderer::CreateCommandPool() {
@@ -515,31 +564,46 @@ namespace Solis {
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         poolInfo.queueFamilyIndex = queueFamilyIndices.GraphicsFamily.value();
         if (vkCreateCommandPool(s_Device, &poolInfo, nullptr, &s_CommandPool) != VK_SUCCESS)
-            ERROR("Failed to create command pool!");
+            FATAL("Failed to create command pool!");
     }
 
     void Renderer::CreateFrameBuffers() {
         s_SwapChainFramebuffers.resize(s_SwapChainImageViews.size());
         for (size_t i = 0; i < s_SwapChainImageViews.size(); i++) {
-            VkImageView attachments[] = {
-                s_SwapChainImageViews[i]
+            std::array<VkImageView, 2> attachments = {
+                s_SwapChainImageViews[i],
+                s_DepthImageView
             };
 
             VkFramebufferCreateInfo framebufferInfo{};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = s_RenderPass;
-            framebufferInfo.attachmentCount = 1;
-            framebufferInfo.pAttachments = attachments;
+            framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+            framebufferInfo.pAttachments = attachments.data();
             framebufferInfo.width = s_SwapChainExtent.width;
             framebufferInfo.height = s_SwapChainExtent.height;
             framebufferInfo.layers = 1;
 
             if (vkCreateFramebuffer(s_Device, &framebufferInfo, nullptr, &s_SwapChainFramebuffers[i]) != VK_SUCCESS)
-                ERROR("Failed to create framebuffer!");
+                FATAL("Failed to create framebuffer!");
         }
     }
 
     void Renderer::CreateRenderPass() {
+        VkAttachmentDescription depthAttatchment{};
+        depthAttatchment.format = FindDepthFormat();
+        depthAttatchment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttatchment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttatchment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttatchment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttatchment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttatchment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAttatchment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthAttatchmentRef{};
+        depthAttatchmentRef.attachment = 1;
+        depthAttatchmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = s_SwapChainImageFormat;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -558,26 +622,28 @@ namespace Solis {
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
-
-        VkRenderPassCreateInfo renderPassInfo{};
-        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
-        renderPassInfo.subpassCount = 1;
-        renderPassInfo.pSubpasses = &subpass;
+        subpass.pDepthStencilAttachment = &depthAttatchmentRef;
 
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttatchment};
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+        renderPassInfo.pAttachments = attachments.data();
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
         renderPassInfo.dependencyCount = 1;
         renderPassInfo.pDependencies = &dependency;
 
         if (vkCreateRenderPass(s_Device, &renderPassInfo, nullptr, &s_RenderPass) != VK_SUCCESS)
-            ERROR("Failed to create render pass!");
+            FATAL("Failed to create render pass!");
     }
 
 
@@ -696,7 +762,19 @@ namespace Solis {
         pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
         if (vkCreatePipelineLayout(s_Device, &pipelineLayoutInfo, nullptr, &s_PipelineLayout) != VK_SUCCESS)
-            ERROR("Failed to create pipeline layout!");
+            FATAL("Failed to create pipeline layout!");
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.minDepthBounds = 0.0f;
+        depthStencil.maxDepthBounds = 1.0f;
+        depthStencil.stencilTestEnable = VK_FALSE;
+        depthStencil.front = {};
+        depthStencil.back = {};
 
         VkGraphicsPipelineCreateInfo pipelineInfo{};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -707,7 +785,7 @@ namespace Solis {
         pipelineInfo.pViewportState = &viewportState;
         pipelineInfo.pRasterizationState = &rasterizer;
         pipelineInfo.pMultisampleState = &multisampling;
-        pipelineInfo.pDepthStencilState = nullptr;
+        pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = s_PipelineLayout;
@@ -717,7 +795,7 @@ namespace Solis {
         pipelineInfo.basePipelineIndex = -1;
 
         if (vkCreateGraphicsPipelines(s_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &s_GraphicsPipeline) != VK_SUCCESS)
-            ERROR("Failed to create graphics pipeline!");
+            FATAL("Failed to create graphics pipeline!");
 
         vkDestroyShaderModule(s_Device, vertShaderModule, nullptr);
         vkDestroyShaderModule(s_Device, fragShaderModule, nullptr);
@@ -726,7 +804,7 @@ namespace Solis {
     void Renderer::CreateImageViews() {
         s_SwapChainImageViews.resize(s_SwapChainImages.size());
         for (size_t i = 0; i < s_SwapChainImages.size(); i++) {
-            s_SwapChainImageViews[i] = CreateImageView(s_SwapChainImages[i], s_SwapChainImageFormat);
+            s_SwapChainImageViews[i] = CreateImageView(s_SwapChainImages[i], s_SwapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
         }
     }
 
@@ -764,7 +842,7 @@ namespace Solis {
         createInfo.clipped = VK_TRUE;
         createInfo.oldSwapchain = VK_NULL_HANDLE;
         if (vkCreateSwapchainKHR(s_Device, &createInfo, nullptr, &s_SwapChain) != VK_SUCCESS)
-            ERROR("Failed to create swap chain!");
+            FATAL("Failed to create swap chain!");
         vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, nullptr);
         s_SwapChainImages.resize(imageCount);
         vkGetSwapchainImagesKHR(s_Device, s_SwapChain, &imageCount, s_SwapChainImages.data());
@@ -774,13 +852,13 @@ namespace Solis {
 
     void Renderer::CreateSurface() {
         if (glfwCreateWindowSurface(s_Instance, s_Window.RawWindow(), nullptr, &s_Surface) != VK_SUCCESS)
-            ERROR("Failed to create window surface!");
+            FATAL("Failed to create window surface!");
     }
 
     void Renderer::CreateInstance() {
         // Check for validation layers
         if (s_EnableValidationLayers && !HasValidationSupport())
-            ERROR("Validation layers requested, but not available!");
+            FATAL("Validation layers requested, but not available!");
 
         // Creating application info
         VkApplicationInfo appInfo{};
@@ -811,7 +889,7 @@ namespace Solis {
         }
 
         if (vkCreateInstance(&createInfo, nullptr, &s_Instance) != VK_SUCCESS)
-            ERROR("Failed to create Vulkan Instance!");
+            FATAL("Failed to create Vulkan Instance!");
     }
 
     void Renderer::SetupDebugMessenger() {
@@ -819,14 +897,14 @@ namespace Solis {
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         PopulateDebugMessengerCreateInfo(createInfo);
         if (CreateDebugUtilsMessengerEXT(s_Instance, &createInfo, nullptr, &s_DebugMessenger) != VK_SUCCESS)
-            ERROR("Failed to set up debug messenger!");
+            FATAL("Failed to set up debug messenger!");
     }
 
     void Renderer::PickDevice() {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(s_Instance, &deviceCount, nullptr);
         if (deviceCount == 0) 
-            ERROR("Failed to find GPUs with Vulkan support!");
+            FATAL("Failed to find GPUs with Vulkan support!");
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(s_Instance, &deviceCount, devices.data());
         for (const auto& device : devices) {
@@ -836,7 +914,7 @@ namespace Solis {
             }
         }
         if (s_PhysicalDevice == VK_NULL_HANDLE)
-            ERROR("Failed to find a suitable GPU!");
+            FATAL("Failed to find a suitable GPU!");
     }
 
     void Renderer::CreateLogicalDevice() {
@@ -870,18 +948,42 @@ namespace Solis {
             createInfo.ppEnabledLayerNames = s_ValidationLayers.data();
         } else createInfo.enabledLayerCount = 0;
         if (vkCreateDevice(s_PhysicalDevice, &createInfo, nullptr, &s_Device) != VK_SUCCESS)
-            ERROR("Failed to create logical device!");
+            FATAL("Failed to create logical device!");
         vkGetDeviceQueue(s_Device, indices.PresentFamily.value(), 0, &s_PresentQueue);
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
     }
+    
+    bool Renderer::HasStencilComponent(VkFormat format) {
+        return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+    }
 
-    VkImageView Renderer::CreateImageView(VkImage image, VkFormat format) {
+    VkFormat Renderer::FindDepthFormat() {
+        return FindSupportedFormat(
+            {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+        );
+    }
+
+    VkFormat Renderer::FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {
+        for (VkFormat format : candidates) {
+            VkFormatProperties props;
+            vkGetPhysicalDeviceFormatProperties(s_PhysicalDevice, format, &props);
+            if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features)
+                return format;
+            else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features)
+                return format;
+        }
+        FATAL("Failed to find a supported format!");
+    }
+
+    VkImageView Renderer::CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags) {
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = format;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.aspectMask = aspectFlags;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -889,7 +991,7 @@ namespace Solis {
 
         VkImageView imageView;
         if (vkCreateImageView(s_Device, &viewInfo, nullptr, &imageView) != VK_SUCCESS)
-            ERROR("failed to create texture image view!");
+            FATAL("failed to create texture image view!");
 
         return imageView;
     }
@@ -1020,7 +1122,7 @@ namespace Solis {
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateImage(s_Device, &imageInfo, nullptr, &image) != VK_SUCCESS)
-            ERROR("Failed to create image!");
+            FATAL("Failed to create image!");
 
         VkMemoryRequirements memRequirements;
         vkGetImageMemoryRequirements(s_Device, image, &memRequirements);
@@ -1031,7 +1133,7 @@ namespace Solis {
         allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
 
         if (vkAllocateMemory(s_Device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS)
-            ERROR("Failed to allocate image memory!");
+            FATAL("Failed to allocate image memory!");
 
         vkBindImageMemory(s_Device, image, imageMemory, 0);
     }
@@ -1066,7 +1168,7 @@ namespace Solis {
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateBuffer(s_Device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) 
-            ERROR("Failed to create buffer!");
+            FATAL("Failed to create buffer!");
 
         VkMemoryRequirements memRequirements;
         vkGetBufferMemoryRequirements(s_Device, buffer, &memRequirements);
@@ -1077,7 +1179,7 @@ namespace Solis {
         allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
 
         if (vkAllocateMemory(s_Device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) 
-            ERROR("Failed to allocate buffer memory!");
+            FATAL("Failed to allocate buffer memory!");
 
         vkBindBufferMemory(s_Device, buffer, bufferMemory, 0);
     }
@@ -1088,7 +1190,7 @@ namespace Solis {
         for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
             if (typeFilter & (1 << i) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties)
                 return i;
-        ERROR("Failed to find a suitable memory type!");
+        FATAL("Failed to find a suitable memory type!");
     }
 
     bool Renderer::HasValidationSupport() {
@@ -1226,7 +1328,7 @@ namespace Solis {
         createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
         VkShaderModule shaderModule;
         if (vkCreateShaderModule(s_Device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
-            ERROR("Failed to create shader module!");
+            FATAL("Failed to create shader module!");
         return shaderModule;
     }
     
@@ -1236,16 +1338,21 @@ namespace Solis {
         beginInfo.flags = 0;
         beginInfo.pInheritanceInfo = nullptr;
         if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS)
-            ERROR("Failed to begin recording command buffer!");
+            FATAL("Failed to begin recording command buffer!");
+
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = s_RenderPass;
         renderPassInfo.framebuffer = s_SwapChainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = s_SwapChainExtent;
-        VkClearValue clearColor = {{{0.01f, 0.01f, 0.01f, 1.0f}}};
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColor;
+
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = {{0.01f, 0.01f, 0.01f, 1.0f}};
+        clearValues[1].depthStencil = {1.0f, 0};
+
+        renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+        renderPassInfo.pClearValues = clearValues.data();
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_GraphicsPipeline);
 
@@ -1274,7 +1381,7 @@ namespace Solis {
         vkCmdEndRenderPass(commandBuffer);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
-            ERROR("Failed to record command buffer!");
+            FATAL("Failed to record command buffer!");
     }
 
 }
