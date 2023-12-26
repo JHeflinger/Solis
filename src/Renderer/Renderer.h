@@ -101,6 +101,8 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static void CreateColorResources();
+        static VkSampleCountFlagBits GetMaxUsableSampleCount();
         static void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
         static bool HasStencilComponent(VkFormat format);
         static VkFormat FindDepthFormat();
@@ -110,7 +112,7 @@ namespace Solis {
         static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
         static VkCommandBuffer BeginSingleTimeCommands();
         static void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
-        static void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+        static void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
         static void UpdateUniformBuffer(uint32_t currentImage);
         static void CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
         static void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);

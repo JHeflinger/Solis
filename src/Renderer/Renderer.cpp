@@ -67,6 +67,10 @@ namespace Solis {
     static VkImage                        s_DepthImage;
     static VkDeviceMemory                 s_DepthImageMemory;
     static VkImageView                    s_DepthImageView;
+    static VkSampleCountFlagBits          s_MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    static VkImage                        s_ColorImage;
+    static VkDeviceMemory                 s_ColorImageMemory;
+    static VkImageView                    s_ColorImageView;
 
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
@@ -140,6 +144,7 @@ namespace Solis {
         CreateDescriptorSetLayout();
         CreateGraphicsPipeline();
         CreateCommandPool();
+        CreateColorResources();
         CreateDepthResources();
         CreateFrameBuffers();
         CreateTextureImage();
@@ -292,6 +297,7 @@ namespace Solis {
         CreateImage(s_SwapChainExtent.width, 
                     s_SwapChainExtent.height,
                     1,
+                    s_MSAASamples,
                     depthFormat,
                     VK_IMAGE_TILING_OPTIMAL,
                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -350,7 +356,7 @@ namespace Solis {
 
         stbi_image_free(pixels);
 
-        CreateImage(texWidth, texHeight, s_MipLevels, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, s_TextureImage, s_TextureImageMemory);
+        CreateImage(texWidth, texHeight, s_MipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, s_TextureImage, s_TextureImageMemory);
         TransitionImageLayout(s_TextureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, s_MipLevels);
         CopyBufferToImage(stagingBuffer, s_TextureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 
@@ -526,6 +532,9 @@ namespace Solis {
     }
 
     void Renderer::CleanSwapChain() {
+        vkDestroyImageView(s_Device, s_ColorImageView, nullptr);
+        vkDestroyImage(s_Device, s_ColorImage, nullptr);
+        vkFreeMemory(s_Device, s_ColorImageMemory, nullptr);
         vkDestroyImageView(s_Device, s_DepthImageView, nullptr);
         vkDestroyImage(s_Device, s_DepthImage, nullptr);
         vkFreeMemory(s_Device, s_DepthImageMemory, nullptr);
@@ -550,6 +559,7 @@ namespace Solis {
 
         CreateSwapChain();
         CreateImageViews();
+        CreateColorResources();
         CreateDepthResources();
         CreateFrameBuffers();
     }
@@ -598,9 +608,10 @@ namespace Solis {
     void Renderer::CreateFrameBuffers() {
         s_SwapChainFramebuffers.resize(s_SwapChainImageViews.size());
         for (size_t i = 0; i < s_SwapChainImageViews.size(); i++) {
-            std::array<VkImageView, 2> attachments = {
+            std::array<VkImageView, 3> attachments = {
+                s_ColorImageView,
+                s_DepthImageView,
                 s_SwapChainImageViews[i],
-                s_DepthImageView
             };
 
             VkFramebufferCreateInfo framebufferInfo{};
@@ -620,7 +631,7 @@ namespace Solis {
     void Renderer::CreateRenderPass() {
         VkAttachmentDescription depthAttatchment{};
         depthAttatchment.format = FindDepthFormat();
-        depthAttatchment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttatchment.samples = s_MSAASamples;
         depthAttatchment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depthAttatchment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depthAttatchment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -634,13 +645,27 @@ namespace Solis {
 
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = s_SwapChainImageFormat;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.samples = s_MSAASamples;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentDescription colorAttachmentResolve{};
+        colorAttachmentResolve.format = s_SwapChainImageFormat;
+        colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        VkAttachmentReference colorAttachmentResolveRef{};
+        colorAttachmentResolveRef.attachment = 2;
+        colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentReference colorAttachmentRef{};
         colorAttachmentRef.attachment = 0;
@@ -651,6 +676,7 @@ namespace Solis {
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
         subpass.pDepthStencilAttachment = &depthAttatchmentRef;
+        subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -660,7 +686,7 @@ namespace Solis {
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-        std::array<VkAttachmentDescription, 2> attachments = {colorAttachment, depthAttatchment};
+        std::array<VkAttachmentDescription, 3> attachments = {colorAttachment, depthAttatchment, colorAttachmentResolve};
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
@@ -754,9 +780,9 @@ namespace Solis {
 
         VkPipelineMultisampleStateCreateInfo multisampling{};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisampling.sampleShadingEnable = VK_FALSE;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        multisampling.minSampleShading = 1.0f; // Optional
+        multisampling.sampleShadingEnable = VK_TRUE; // WARNING: AT EXTRA PERFORMANCE COST
+        multisampling.rasterizationSamples = s_MSAASamples;
+        multisampling.minSampleShading = 0.2f; // set this ti 0.0f if enabling sample shading
         multisampling.pSampleMask = nullptr; // Optional
         multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
         multisampling.alphaToOneEnable = VK_FALSE; // Optional
@@ -938,6 +964,7 @@ namespace Solis {
         for (const auto& device : devices) {
             if (SuitableDevice(device)) {
                 s_PhysicalDevice = device;
+                s_MSAASamples = GetMaxUsableSampleCount();
                 break;
             }
         }
@@ -963,6 +990,7 @@ namespace Solis {
 
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
+        deviceFeatures.sampleRateShading = VK_TRUE;
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -979,6 +1007,27 @@ namespace Solis {
             FATAL("Failed to create logical device!");
         vkGetDeviceQueue(s_Device, indices.PresentFamily.value(), 0, &s_PresentQueue);
         vkGetDeviceQueue(s_Device, indices.GraphicsFamily.value(), 0, &s_GraphicsQueue);
+    }
+
+    void Renderer::CreateColorResources() {
+        VkFormat colorFormat = s_SwapChainImageFormat;
+        CreateImage(s_SwapChainExtent.width, s_SwapChainExtent.height, 1, s_MSAASamples, colorFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, s_ColorImage, s_ColorImageMemory);
+        s_ColorImageView = CreateImageView(s_ColorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+    }
+
+    VkSampleCountFlagBits Renderer::GetMaxUsableSampleCount() {
+        VkPhysicalDeviceProperties physicalDeviceProperties;
+        vkGetPhysicalDeviceProperties(s_PhysicalDevice, &physicalDeviceProperties);
+
+        VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+        if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+        if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+        if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+        if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+        if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+        if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+        return VK_SAMPLE_COUNT_1_BIT;
     }
 
     void Renderer::GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) {
@@ -1218,7 +1267,7 @@ namespace Solis {
         vkFreeCommandBuffers(s_Device, s_CommandPool, 1, &commandBuffer);
     }
 
-    void Renderer::CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+    void Renderer::CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1231,7 +1280,7 @@ namespace Solis {
         imageInfo.tiling = tiling;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         imageInfo.usage = usage;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.samples = numSamples;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateImage(s_Device, &imageInfo, nullptr, &image) != VK_SUCCESS)
