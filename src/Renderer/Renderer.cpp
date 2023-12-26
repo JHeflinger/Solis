@@ -8,6 +8,7 @@
 #include <limits>
 #include <algorithm>
 #include <chrono>
+#include <unordered_map>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -20,6 +21,9 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 #define MAX_FRAMES_IN_FLIGHT 2
 
@@ -67,6 +71,8 @@ namespace Solis {
     static Window                         s_Window;
     static uint32_t                       s_CurrentFrame = 0;
     static bool                           s_FramebufferResized = false;
+    static std::vector<Vertex>            s_Vertices;
+    static std::vector<uint32_t>          s_Indices;
 
     static const std::vector<const char*> s_ValidationLayers = {
         "VK_LAYER_KHRONOS_validation"
@@ -74,23 +80,6 @@ namespace Solis {
 
     static std::vector<const char*> s_DeviceExtensions = {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
-    };
-
-    static const std::vector<Vertex> s_Vertices = {
-        {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-        {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-
-        {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-        {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-        {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    };
-
-    static const std::vector<uint16_t> s_Indices = {
-        0, 1, 2, 2, 3, 0,
-        4, 5, 6, 6, 7, 4
     };
 
     #ifdef NDEBUG
@@ -155,6 +144,7 @@ namespace Solis {
         CreateTextureImage();
         CreateTextureImageView();
         CreateTextureSampler();
+        LoadModel();
         CreateVertexBuffer();
         CreateIndexBuffer();
         CreateUniformBuffers();
@@ -262,6 +252,34 @@ namespace Solis {
         s_Window.Cleanup();
     }
 
+    void Renderer::LoadModel() {
+        tinyobj::attrib_t attrib;
+        std::vector<tinyobj::shape_t> shapes;
+        std::vector<tinyobj::material_t> materials;
+        std::string warn, err;
+
+        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, FileUtils::Path("models/default.obj").c_str()))
+            FATAL(warn + err);
+
+        for (const auto& shape : shapes) {
+            for (const auto& index : shape.mesh.indices) {
+                Vertex vertex{};
+                vertex.Position = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+                vertex.TextureCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+                };
+                vertex.Color = {1.0f, 1.0f, 1.0f};
+                s_Vertices.push_back(vertex);
+                s_Indices.push_back(s_Indices.size());
+            }
+        }
+    }
+
     void Renderer::CreateDepthResources() {
         VkFormat depthFormat = FindDepthFormat();
         CreateImage(s_SwapChainExtent.width, 
@@ -305,7 +323,7 @@ namespace Solis {
 
     void Renderer::CreateTextureImage() {
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(FileUtils::Path("textures/default.jpg").c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(FileUtils::Path("textures/default.png").c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels)
@@ -1359,7 +1377,7 @@ namespace Solis {
         VkBuffer vertexBuffers[] = {s_VertexBuffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(commandBuffer, s_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        vkCmdBindIndexBuffer(commandBuffer, s_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         VkViewport viewport{};
         viewport.x = 0.0f;

@@ -67,6 +67,7 @@ namespace Solis {
         static void Wait();
         static void Cleanup();
     private:
+        static void LoadModel();
         static void CreateDepthResources();
         static void CreateTextureSampler();
         static void CreateTextureImageView();
