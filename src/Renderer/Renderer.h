@@ -6,6 +6,9 @@
 #include <optional>
 #include <array>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 namespace Solis {
     struct UniformBufferObject {
         glm::mat4 Model;
@@ -44,6 +47,10 @@ namespace Solis {
             attributeDescription[2].offset = offsetof(Vertex, TextureCoord);
 
             return attributeDescription;
+        }
+
+        bool operator==(const Vertex& other) const {
+            return Position == other.Position && Color == other.Color && TextureCoord == other.TextureCoord;
         }
     };
 
@@ -94,15 +101,16 @@ namespace Solis {
         static void SetupDebugMessenger();
         static void PickDevice();
         static void CreateLogicalDevice();
+        static void GenerateMipmaps(VkImage image, VkFormat imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
         static bool HasStencilComponent(VkFormat format);
         static VkFormat FindDepthFormat();
         static VkFormat FindSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
-        static VkImageView CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+        static VkImageView CreateImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
         static void CopyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
-        static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+        static void TransitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
         static VkCommandBuffer BeginSingleTimeCommands();
         static void EndSingleTimeCommands(VkCommandBuffer commandBuffer);
-        static void CreateImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+        static void CreateImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
         static void UpdateUniformBuffer(uint32_t currentImage);
         static void CopyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size);
         static void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
@@ -118,5 +126,15 @@ namespace Solis {
         static VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
         static VkShaderModule CreateShaderModule(const std::vector<char>& code);
         static void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+    };
+}
+
+namespace std {
+    template<> struct hash<Solis::Vertex> {
+        size_t operator() (Solis::Vertex const& vertex) const {
+            return ((hash<glm::vec3>()(vertex.Position) ^
+                    (hash<glm::vec3>()(vertex.Color) << 1)) >> 1) ^
+                    (hash<glm::vec2>()(vertex.TextureCoord) << 1);
+        }
     };
 }

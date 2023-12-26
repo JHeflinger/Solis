@@ -6,6 +6,8 @@ particle
 texture
 model
 
+renderer settings like turning on and off antialiasig or mipmappig and stuff
+
 console help command, can take another argument for a more specialized todo, like manpages
 
 remodel window update to take in a function 
