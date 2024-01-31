@@ -8,15 +8,6 @@ cc_library(
         "src/*.h",
         "src/**/*.h"
     ]),
-    deps = [
-        "//vendor:stb_image",
-        "//vendor:tiny_obj_loader"
-    ]
-)
-
-cc_binary(
-    name = "Flare",
-    srcs = ["src/main.cpp"],
     linkopts = [
         "-lglfw",
         "-lvulkan",
@@ -27,6 +18,15 @@ cc_binary(
         "-lXrandr",
         "-lXi",
     ],
+    deps = [
+        "//vendor:stb_image",
+        "//vendor:tiny_obj_loader"
+    ]
+)
+
+cc_binary(
+    name = "Flare",
+    srcs = ["src/main.cpp"],
     deps = [
         ":Solis"
     ],
